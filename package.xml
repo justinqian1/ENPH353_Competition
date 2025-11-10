@@ -1,0 +1,18 @@
+<package format="2">
+  <name>team5_code</name>
+  <version>0.0.1</version>
+  <description>
+  Team 5 ENPH 353 competition code 
+  </description>
+  <maintainer email="jqian16@student.ubc.ca">Justin Qian</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <depend>geometry_msgs</depend>
+  <exec_depend>opencv2</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+
+</package>

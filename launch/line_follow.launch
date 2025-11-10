@@ -1,0 +1,7 @@
+<launch>
+    <node pkg="team5_code" 
+		type="line_follow.py" 
+		name="line_detector" 
+		output="screen">
+  	</node>
+</launch>
