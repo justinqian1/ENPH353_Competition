@@ -5,6 +5,7 @@
   Team 5 ENPH 353 competition code 
   </description>
   <maintainer email="jqian16@student.ubc.ca">Justin Qian</maintainer>
+  <maintainer email="ezraklukas@gmail.com">Ezra Klukas</maintainer>
   <license>BSD</license>
 
   <buildtool_depend>catkin</buildtool_depend>

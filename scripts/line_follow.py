@@ -13,7 +13,7 @@ def find_features(image):
     channel_g=image[:,:,1]
     channel_r=image[:,:,2]
     b_minus_g=channel_b-channel_g
-    b_minus_r=channel_b-channel_g
+    b_minus_r=channel_b-channel_r
     g_minus_r=channel_g-channel_r
 
     line1_mask=(channel_b>245) & (channel_g>245) & (channel_r>245)

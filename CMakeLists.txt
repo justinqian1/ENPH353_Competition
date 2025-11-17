@@ -8,5 +8,8 @@ catkin_package()
 
 catkin_install_python(PROGRAMS
   scripts/line_follow.py
+  scripts/plate_detect.py
+  scripts/plate_gen.py
+  scripts/spawn_pos.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

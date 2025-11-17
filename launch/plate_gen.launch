@@ -1,0 +1,7 @@
+<launch>
+    <node pkg="team5_code"
+    type="plate_gen.py"
+    name="plate_generator"
+    output="screen">
+    </node>
+</launch>
