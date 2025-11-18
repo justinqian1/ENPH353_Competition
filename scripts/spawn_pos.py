@@ -3,7 +3,8 @@
 from __future__ import print_function
 import rospy
 from gazebo_msgs.msg import ModelState
-from std_msgs.msg import Int32MultiArray
+from gazebo_msgs.srv import SetModelState
+from std_msgs.msg import Float32MultiArray
 
 class SpawnPosition:
     """
@@ -13,9 +14,10 @@ class SpawnPosition:
     Listens for messages on dedicated topic for teleport positions, then spawns robot in requested position.
     """
 
-    def spawn_position(self, position):
+    def callback(self, data):
         msg = ModelState()
         msg.model_name = 'B1'
+        position = data.data
 
         msg.pose.position.x = position[0]
         msg.pose.position.y = position[1]
@@ -27,7 +29,7 @@ class SpawnPosition:
 
         rospy.wait_for_service('/gazebo/set_model_state')
         try:
-            set_state = rospy.ServiceProxy('/gazebo/set_model_state', msg)
+            set_state = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
             resp = set_state( msg )
 
         except rospy.ServiceException:
@@ -35,7 +37,7 @@ class SpawnPosition:
 
     def __init__(self):
         position_topic = rospy.get_param("~position_topic", "/spawn_position")
-        self.pos_sub = rospy.Subscriber(position_topic, Int32MultiArray, self.spawn_position, queue_size=1)
+        self.pos_sub = rospy.Subscriber('/spawn_position', Float32MultiArray, self.callback, queue_size=10)
 
 def main():
     rospy.init_node('spawn_position', anonymous=True)
