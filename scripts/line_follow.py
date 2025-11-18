@@ -3,10 +3,13 @@ from __future__ import print_function
 import rospy
 import cv2
 from sensor_msgs.msg import Image
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Int32MultiArray, String
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
 from scipy import ndimage
+
+start_timer = String('team,pass,0,whatever')
+stop_timer = String('team,pass,-1,whatever')
 
 def find_features(image):
     channel_b=image[:,:,0]
@@ -81,6 +84,7 @@ class LineDetector:
         line_location = rospy.get_param('~line_location', '/line_location')
         self.result_pub = rospy.Publisher(line_location, Int32MultiArray, queue_size=1)
         self.image_sub = rospy.Subscriber(image_topic, Image, self.callback, queue_size=1)
+        self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
         self.bridge = CvBridge()
 
     def callback(self,data):
@@ -103,6 +107,12 @@ class LineDetector:
 def main():
     rospy.init_node('line_detector', anonymous=True)
     ic = LineDetector()
+    rospy.sleep(1)
+    ic.time_pub.publish(start_timer)
+    # I'd like to implement so that we only send stop message when we stop moving even if we're sending some commands, which means we fell somewhere; I'm assuming this will happen haha.
+    rospy.sleep(3)
+    ic.time_pub.publish(stop_timer)
+    
     try:
         rospy.spin()
     except KeyboardInterrupt:
