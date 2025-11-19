@@ -3,13 +3,9 @@ from __future__ import print_function
 import rospy
 import cv2
 from sensor_msgs.msg import Image
-from std_msgs.msg import Int32MultiArray, String
+from std_msgs.msg import Int32MultiArray
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
-from scipy import ndimage
-
-start_timer = String('team,pass,0,whatever')
-stop_timer = String('team,pass,-1,whatever')
 
 def find_features(image):
     channel_b=image[:,:,0]
@@ -22,7 +18,7 @@ def find_features(image):
     line1_mask=(channel_b>245) & (channel_g>245) & (channel_r>245)
     line2_mask=(channel_r>185) & (channel_r<220) & (channel_g>185) & (channel_g<220) & (channel_b>130) & (channel_b<170)
     line_mask=line1_mask | line2_mask
-    sign_mask=(b_minus_g>90) & (b_minus_g<110) & (b_minus_r>90) & (b_minus_r<110)
+    #sign_mask=(b_minus_g>90) & (b_minus_g<110) & (b_minus_r>90) & (b_minus_r<110)
     red_line_mask=(channel_r>245) & (channel_b<10) & (channel_g<10)
     pink_line_mask=(channel_r>245) & (channel_b>245) & (channel_g<10)
     ped_mask=(b_minus_g>3) & (b_minus_g<13) & (g_minus_r>5) & (g_minus_r<15)
@@ -37,7 +33,7 @@ def find_features(image):
     features_mask[600:,615:620,2]=120
     features_mask[600:605,180:620,2]=120
     features_mask[line_mask]=255
-    features_mask[:,:,0][sign_mask]=255
+    #features_mask[:,:,0][sign_mask]=255
     features_mask[:,:,2][red_line_mask]=255
     features_mask[:,:,0][pink_line_mask]=255
     features_mask[:,:,2][pink_line_mask]=255
@@ -58,19 +54,9 @@ def find_features(image):
     pink_line_sz=np.sum(pink_line_mask[:])
     ped_sz=np.sum(ped_mask[:])
     truck_sz=np.sum(truck_mask[:])
-    
-    
-    sign_size=np.sum(sign_mask[:])
-    '''
-    if sign_size>2000: # enough of the sign is visible    
-        labeled, _ = ndimage.label(sign_mask)
-        largest=np.bincount(labeled.ravel())[1:].max()
-        print(largest)
-        #if largest>4000: # one sign; now check if all sides of sign are visible
-        # TODO
-    '''
+    #sign_size=np.sum(sign_mask[:])
 
-    return [line_in_front,line_left_coord,line_right_coord,sign_size,red_line_sz,pink_line_sz,ped_sz,truck_sz]
+    return [line_in_front,line_left_coord,line_right_coord,red_line_sz,pink_line_sz,ped_sz,truck_sz]
     
 class LineDetector:
     """
@@ -81,10 +67,9 @@ class LineDetector:
     """
     def __init__(self):
         image_topic = rospy.get_param('~image_topic', '/B1/rrbot/camera1/image_raw')
-        line_location = rospy.get_param('~line_location', '/line_location')
-        self.result_pub = rospy.Publisher(line_location, Int32MultiArray, queue_size=1)
+        drive_info = rospy.get_param('~drive_info', '/drive_info')
+        self.result_pub = rospy.Publisher(drive_info, Int32MultiArray, queue_size=1)
         self.image_sub = rospy.Subscriber(image_topic, Image, self.callback, queue_size=1)
-        self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
         self.bridge = CvBridge()
 
     def callback(self,data):
@@ -107,11 +92,6 @@ class LineDetector:
 def main():
     rospy.init_node('line_detector', anonymous=True)
     ic = LineDetector()
-    rospy.sleep(1)
-    ic.time_pub.publish(start_timer)
-    # I'd like to implement so that we only send stop message when we stop moving even if we're sending some commands, which means we fell somewhere; I'm assuming this will happen haha.
-    rospy.sleep(3)
-    ic.time_pub.publish(stop_timer)
     
     try:
         rospy.spin()

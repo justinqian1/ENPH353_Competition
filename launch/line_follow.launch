@@ -4,4 +4,9 @@
 		name="line_detector" 
 		output="screen">
   	</node>
+	<node pkg="team5_code"
+         type="drive.py"
+         name="driver" 
+         output="screen">
+   </node>
 </launch>
