@@ -15,8 +15,10 @@ GRAY_MASK = [10, -10, 10, -10, 10, -10]
 TEXT_MASK = [256, 30, 256, 30, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
-MIN_MASK_SIZE = 4000
+MIN_BLUE_COUNT = 4000
 MIN_PLATE_AREA = 3000
+MIN_SIGN_COUNT = 100
+MIN_SIGN_AREA = 100
 OUTPUT_SHAPE = (400,200)
 COOL_DOWN_TIME = 5.0
 
@@ -42,60 +44,66 @@ class PlateDetector:
 
         return analysis_mask
 
-    def scan_sign(self):
+    def extract_process_plate(self, frame, mask, min_count, min_area, output_shape=(400,200)):
+        analysis_mask = self.apply_mask(frame, mask)
+
+        if np.count_nonzero(analysis_mask) < min_count:
+            return None
+
+        contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return None
+
+        sign_cnt = max(contours, key=cv2.contourArea)
+
+        req_acc = 0.02 * cv2.arcLength(sign_cnt, True) # tells approxPolyDP maximal distance allowed between contour and simplified polygon.
+        approx = cv2.approxPolyDP(sign_cnt, req_acc, True)
+
+        # If the shape of the largest contour isn't a rectangle, it's likely some of the border is off the screen, so we shouldn't trust that the text will be fully included.
+        if len(approx) != 4  or cv2.contourArea(approx) < min_area:
+            return None
+
+        corners = approx.reshape(4, 2).astype(np.float32)
+
+        # Sanity reminder: top left (0,0), bottom right (w,h).
+        def order_pts(pts):
+            sum_xy = pts.sum(axis=1)
+            diff_xy = np.diff(pts, axis=1).reshape(-1)
+            tl = pts[np.argmin(sum_xy)]
+            br = pts[np.argmax(sum_xy)]
+            tr = pts[np.argmin(diff_xy)]
+            bl = pts[np.argmax(diff_xy)]
+            return np.array([tl, tr, br, bl])
+
+        # Now we order the points (must find 
+        corners_ordered = order_pts(corners)
+
+        # Defining what we want the output rectangle to be.
+        W, H = output_shape
+        dest = np.array([
+            [0,0],
+            [W - 1, 0],
+            [W - 1, H - 1],
+            [0, H - 1],
+            ], dtype=np.float32)
+
+        M = cv2.getPerspectiveTransform(corners_ordered, dest)
+        plate_rectified = cv2.warpPerspective(frame, M, (W, H))
+
+        return plate_rectified
+
+
+    def scan_sign(self, mask, min_count, min_area):
         """
 
         """
         images = [self.centre_image, self.left_image, self.right_image]
 
         for image in images:
-            mask = self.apply_mask(image, SIGN_MASK)
-            print(np.count_nonzero(mask))
-            if np.count_nonzero(mask) < MIN_MASK_SIZE:
-                continue
-
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                continue
-
-            sign_cnt = max(contours, key=cv2.contourArea)
-            req_acc = 0.02 * cv2.arcLength(sign_cnt, True)
-            approx = cv2.approxPolyDP(sign_cnt, req_acc, True)
-
-            print("Area: " + str(cv2.contourArea(approx)))
-
-            if len(approx) != 4 or cv2.contourArea(approx) < MIN_PLATE_AREA:
-                continue 
-
-            print("How about here?")
-            corners = approx.reshape(4, 2).astype(np.float32)
-
-            # Sanity reminder: top left (0,0), bottom right (w,h).
-            def order_pts(pts):
-                sum_xy = pts.sum(axis=1)
-                diff_xy = np.diff(pts, axis=1).reshape(-1)
-                tl = pts[np.argmin(sum_xy)]
-                br = pts[np.argmax(sum_xy)]
-                tr = pts[np.argmin(diff_xy)]
-                bl = pts[np.argmax(diff_xy)]
-                return np.array([tl, tr, br, bl])
-
-            # Now we order the points (must find 
-            corners_ordered = order_pts(corners)
-
-            # Defining what we want the output rectangle to be.
-            W, H = OUTPUT_SHAPE
-            dest = np.array([
-                [0,0],
-                [W - 1, 0],
-                [W - 1, H - 1],
-                [0, H - 1],
-                ], dtype=np.float32)
-
-            M = cv2.getPerspectiveTransform(corners_ordered, dest)
-            plate_rectified = cv2.warpPerspective(image, M, (W, H))
-
-            return plate_rectified
+            poss_plate = self.extract_process_plate(image, mask, min_count, min_area)
+            if poss_plate is not None:
+                return poss_plate
         return None
 
 
@@ -132,12 +140,14 @@ class PlateDetector:
             return
         if self.centre_image is None or self.left_image is None or self.right_image is None:
             return
-        poss_plate=self.scan_sign()
+        poss_plate=self.scan_sign(SIGN_MASK, MIN_BLUE_COUNT, MIN_PLATE_AREA)
         if poss_plate is not None:
-            cv2.imshow("Plate " + str(self.curr_plate), poss_plate)
-            cv2.waitKey(3)
-            self.curr_plate += 1
-            self.last_scan_time = time()
+            poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
+            if poss_sign is not None:                
+                cv2.imshow("Plate " + str(self.curr_plate), poss_sign)
+                cv2.waitKey(3)
+                self.curr_plate += 1
+                self.last_scan_time = time()
 
     def centre_callback(self, data):
         try:
