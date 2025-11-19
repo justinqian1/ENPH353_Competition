@@ -30,8 +30,10 @@ POS_VAR = 0.1
 W_VAR = 0.1
 # MASKS: [b_minus_g_upper, b_minus_g_lower, b_minus_r_upper,
 #         b_minus_r_lower, g_minus_r_upper, g_minus_r_lower]
+IDEAL_BRIGHTNESS = 100
 SIGN_MASK = [110, 90, 110, 90, 256, -256]
 GRAY_MASK = [10, -10, 10, -10, 10, -10]
+TEXT_MASK = [256, 30, 256, 30, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
 
@@ -42,8 +44,7 @@ class PlateGenerator:
 
     Teleports robot to approximate picture taking positions, and then takes pictures and uploads them to data collection folder for image processing.
     """
-
-    def platemask(self, image, mask):
+    def apply_mask(self, image, mask):
         channel_b=image[:,:,0]
         channel_g=image[:,:,1]
         channel_r=image[:,:,2]
@@ -56,10 +57,12 @@ class PlateGenerator:
         analysis_mask = np.zeros(image.shape[:2], dtype=np.uint8)
         analysis_mask[feature_mask] = 255
 
-        return cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return analysis_mask
     
     def extract_process_plate(self, frame, mask, output_shape=(400,200)):
-        contours, _ = self.platemask(frame, mask)
+        analysis_mask = self.apply_mask(frame, mask)
+
+        contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
             raise ValueError("Image doesn't contain a sign!")
@@ -148,7 +151,8 @@ def main():
         extracted_plate_border = ic.extract_process_plate(ic.cv_image, SIGN_MASK)
         extracted_plate = ic.extract_process_plate(extracted_plate_border, GRAY_MASK)
         ic.plate_pics.append(extracted_plate)
-        cv2.imshow('Plate' + str(plate+1), extracted_plate) # CONT here next 16:08
+        text = ic.apply_mask(extracted_plate, TEXT_MASK)
+        cv2.imshow('Plate' + str(plate+1), text) # CONT here next 16:08
         cv2.waitKey(10)
 
     while(True):
