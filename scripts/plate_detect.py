@@ -21,12 +21,12 @@ MIN_SIGN_COUNT = 100
 MIN_SIGN_AREA = 100
 OUTPUT_SHAPE = (800,400)
 COOL_DOWN_TIME = 5.0
-CHAR_WIDTH_PROP = 0.075
-CHAR_HEIGHT_PROP = 0.15
+CHAR_WIDTH_PROP = 0.077
+CHAR_HEIGHT_PROP = 0.152
 BOT_ROW_Y = 268/400
 TOP_ROW_Y = 45/400
-BOT_ROW_X = 0.048
-TOP_ROW_X = 325/800
+BOT_ROW_X = 0.044
+TOP_ROW_X = 332/800
 CHARS_TOP_ROW = 7
 CHARS_BOT_ROW = 12
 
@@ -38,6 +38,60 @@ class PlateDetector:
 
     Processes images from camera live feed and takes a picture once plate is found, to send over **ROSTOPIC**
     """
+
+    def __init__(self):
+        self.curr_plate = 1
+        self.last_scan_time = time()
+
+        self.pixel_pub = rospy.Publisher("/plate/pixel_count", Int32, queue_size=10)
+        self.area_pub = rospy.Publisher("/plate/largest_area", Int32, queue_size=10)
+
+        left_image_topic = rospy.get_param("~left_image_topic", "/B1/rrbot/lcam/image_raw")
+        right_image_topic = rospy.get_param("~right_image_topic", "/B1/rrbot/rcam/image_raw")
+        self.left_image_sub = rospy.Subscriber(
+            left_image_topic, Image, self.left_callback, queue_size=1
+        )
+        self.right_image_sub = rospy.Subscriber(
+            right_image_topic, Image, self.right_callback, queue_size=1
+        )
+        self.timer = rospy.Timer(rospy.Duration(0.2), self.callback)
+        self.left_image = None
+        self.right_image = None
+        self.bridge = CvBridge()
+
+    def callback(self, event):
+        if time() - self.last_scan_time < COOL_DOWN_TIME:
+            return
+        if self.left_image is None or self.right_image is None:
+            return
+        poss_plate=self.scan_sign(SIGN_MASK, MIN_BLUE_COUNT, MIN_PLATE_AREA)
+        if poss_plate is not None:
+            poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
+            if poss_sign is not None:                
+                extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
+                #isolated_contours = self.isolate_letters(extracted_text)
+                isolated_contours = self.text_predefined_boxes(extracted_text)
+                cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
+                cv2.waitKey(3)
+                self.curr_plate += 1
+                self.last_scan_time = time()
+
+    def left_callback(self, data):
+        try:
+            self.left_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            rospy.logerr(e)
+            return
+        return
+
+    def right_callback(self, data):
+        try:
+            self.right_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            rospy.logerr(e)
+            return
+        return
+
     def apply_mask(self, image, mask):
         """
         @brief applies and binarizes channel difference mask
@@ -124,7 +178,7 @@ class PlateDetector:
         """
 
         """
-        images = [self.centre_image, self.left_image, self.right_image]
+        images = [self.left_image, self.right_image]
 
         for image in images:
             poss_plate = self.extract_process_plate(image, mask, min_count, min_area)
@@ -169,71 +223,7 @@ class PlateDetector:
 
         return text_img
 
-    def __init__(self):
-        self.curr_plate = 1
-        self.last_scan_time = time()
 
-        self.pixel_pub = rospy.Publisher("/plate/pixel_count", Int32, queue_size=10)
-        self.area_pub = rospy.Publisher("/plate/largest_area", Int32, queue_size=10)
-
-        centre_image_topic = rospy.get_param("~centre_image_topic", "/B1/rrbot/camera1/image_raw")
-        left_image_topic = rospy.get_param("~left_image_topic", "/B1/rrbot/lcam/image_raw")
-        right_image_topic = rospy.get_param("~right_image_topic", "/B1/rrbot/rcam/image_raw")
-        self.centre_image_sub = rospy.Subscriber(
-            centre_image_topic, Image, self.centre_callback, queue_size=1
-        ) 
-        self.left_image_sub = rospy.Subscriber(
-            left_image_topic, Image, self.left_callback, queue_size=1
-        )
-        self.right_image_sub = rospy.Subscriber(
-            right_image_topic, Image, self.right_callback, queue_size=1
-        )
-        self.timer = rospy.Timer(rospy.Duration(0.2), self.callback)
-        self.centre_image = None
-        self.left_image = None
-        self.right_image = None
-        self.bridge = CvBridge()
-
-    def callback(self, event):
-        if time() - self.last_scan_time < COOL_DOWN_TIME:
-            return
-        if self.centre_image is None or self.left_image is None or self.right_image is None:
-            return
-        poss_plate=self.scan_sign(SIGN_MASK, MIN_BLUE_COUNT, MIN_PLATE_AREA)
-        if poss_plate is not None:
-            poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
-            if poss_sign is not None:                
-                extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
-                #isolated_contours = self.isolate_letters(extracted_text)
-                isolated_contours = self.text_predefined_boxes(extracted_text)
-                cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
-                cv2.waitKey(3)
-                self.curr_plate += 1
-                self.last_scan_time = time()
-
-    def centre_callback(self, data):
-        try:
-            self.centre_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-        except CvBridgeError as e:
-            rospy.logerr(e)
-            return
-        return
-
-    def left_callback(self, data):
-        try:
-            self.left_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-        except CvBridgeError as e:
-            rospy.logerr(e)
-            return
-        return
-
-    def right_callback(self, data):
-        try:
-            self.right_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-        except CvBridgeError as e:
-            rospy.logerr(e)
-            return
-        return
 
 def main():
     rospy.init_node('plate_detector', anonymous=True)

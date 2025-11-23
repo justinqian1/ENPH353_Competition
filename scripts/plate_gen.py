@@ -14,26 +14,39 @@ from scipy.spatial.transform import Rotation as R
 
 # POSITIONS
 # [x, y, z, ox, oy, oz, w]
-POS_PLATE_1=[5.45,2.08,0.04,0,0,-0.92]
-POS_PLATE_2=[5.42,-0.9,0.04,0,0,-1.9]
-POS_PLATE_3=[4.59,-1.89,0.04,0,0,-3.12]
-POS_PLATE_4=[0.56,-1.03,0.04,0,0,1.083]
-POS_PLATE_5=[0.613,2.02,0.04,0,0,-1.144]
-POS_PLATE_6=[-2.83,1.346,0.04,0,0,2.592]
-POS_PLATE_7=[-4.22,-1.68,0.04,0,0,-0.644]
-POS_PLATE_8=[-1.63,-1.33,1.86,0.01,0.0366,0.203]
+POS_PLATE_1=[5.489,2.00,0.04,0,0,-1.76]
+POS_PLATE_2=[5.47,-0.97,0.04,0,0,-1.45]
+POS_PLATE_3=[4.41,-1.77,0.04,0,0,2.29]
+POS_PLATE_4=[0.504,-0.81,0.04,0,0,1.644]
+POS_PLATE_5=[0.646,2.05,0.04,0,0,-2.43]
+POS_PLATE_6=[-3.07,1.43,0.04,0,0,-3.09]
+POS_PLATE_7=[-4.29,-1.85,0.04,0,0,-0.898]
+POS_PLATE_8=[-1.39,-1.36,1.85,0.01,0.0375,-0.03]
 POS_PLATES=[
         POS_PLATE_1, POS_PLATE_2, POS_PLATE_3, POS_PLATE_4, 
         POS_PLATE_5, POS_PLATE_6, POS_PLATE_7, POS_PLATE_8
         ]
 POS_VAR = 0.1
 W_VAR = 0.1
+CHAR_WIDTH_PROP = 0.077
+CHAR_HEIGHT_PROP = 0.152
+BOT_ROW_Y = 268/400
+TOP_ROW_Y = 45/400
+BOT_ROW_X = 0.046
+TOP_ROW_X = 333/800
+CHARS_TOP_ROW = 7
+CHARS_BOT_ROW = 12
+MIN_BLUE_COUNT = 10000
+MIN_PLATE_AREA = 24000
+MIN_SIGN_COUNT = 100
+MIN_SIGN_AREA = 100
+OUTPUT_SHAPE = (800,400)
 # MASKS: [b_minus_g_upper, b_minus_g_lower, b_minus_r_upper,
 #         b_minus_r_lower, g_minus_r_upper, g_minus_r_lower]
 IDEAL_BRIGHTNESS = 100
 SIGN_MASK = [110, 90, 110, 90, 256, -256]
 GRAY_MASK = [10, -10, 10, -10, 10, -10]
-TEXT_MASK = [256, 30, 256, 30, 256, -256]
+TEXT_MASK = [256, 55, 256, 55, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
 
@@ -44,6 +57,40 @@ class PlateGenerator:
 
     Teleports robot to approximate picture taking positions, and then takes pictures and uploads them to data collection folder for image processing.
     """
+
+    def __init__(self):
+        position_topic = rospy.get_param("~position_topic", "/spawn_position")
+        self.pos_pub = rospy.Publisher(position_topic, Float32MultiArray, queue_size=10)
+
+        left_image_topic = rospy.get_param("~left_image_topic", "/B1/rrbot/lcam/image_raw")
+        right_image_topic = rospy.get_param("~right_image_topic", "/B1/rrbot/rcam/image_raw")
+        self.left_image_sub = rospy.Subscriber(
+            left_image_topic, Image, self.left_callback, queue_size=1
+        )
+        self.right_image_sub = rospy.Subscriber(
+            right_image_topic, Image, self.right_callback, queue_size=1
+        )
+        self.plate_pics = []
+        self.left_image = None
+        self.right_image = None
+        self.bridge = CvBridge()
+
+    def left_callback(self, data):
+        try:
+            self.left_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            rospy.logerr(e)
+            return
+        return
+
+    def right_callback(self, data):
+        try:
+            self.right_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            rospy.logerr(e)
+            return
+        return
+
     def apply_mask(self, image, mask):
         channel_b=image[:,:,0]
         channel_g=image[:,:,1]
@@ -65,7 +112,8 @@ class PlateGenerator:
         contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
-            raise ValueError("Image doesn't contain a sign!")
+            cv2.imshow("Failed blue mask: ", frame)
+            return None
 
         sign_cnt = max(contours, key=cv2.contourArea)
 
@@ -74,7 +122,8 @@ class PlateGenerator:
 
         # If the shape of the largest contour isn't a rectangle, it's likely some of the border is off the screen, so we shouldn't trust that the text will be fully included.
         if len(approx) != 4:
-            raise ValueError("Full sign not included in frame!")
+            cv2.imshow("Blue mask passed num count, not contour shape: ", frame)
+            return None
 
         corners = approx.reshape(4, 2).astype(np.float32)
 
@@ -109,6 +158,55 @@ class PlateGenerator:
         quat = R.from_euler('xyz', eul_rep[-3:], degrees=False).as_quat()
         return eul_rep[:3] + quat.tolist()
 
+    def scan_sign(self, mask):
+        """
+
+        """
+        images = [self.left_image, self.right_image]
+
+        for image in images:
+            poss_plate = self.extract_process_plate(image, mask)
+            if poss_plate is not None:
+                return poss_plate
+        return None
+
+    def isolate_letters(self, text_img):
+        contours, _ = cv2.findContours(text_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        img_width, img_height = text_img.shape
+        w = int(img_width * CHAR_WIDTH_PROP)
+        h = int(img_height * CHAR_HEIGHT_PROP)
+        for cnt in contours:
+            x, y, _w, _h = cv2.boundingRect(cnt)
+            print("[top left](x,y): (" + str(x) + ", " + str(y) + "), (w, h): (" + str(_w) + ", " + str(_h) + ")")
+    
+            # Draw the rectangle on the original image
+            # (image, top-left corner, bottom-right corner, color, thickness)
+            cv2.rectangle(text_img, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
+
+        return text_img
+
+    def text_predefined_boxes(self, text_img):
+        img_height, img_width = text_img.shape
+        print("Image width: " + str(img_width) + " Image height: " + str(img_height))
+        w = int(img_width * CHAR_WIDTH_PROP)
+        h = int(img_height * CHAR_HEIGHT_PROP)
+        x = int(img_width * TOP_ROW_X)
+        y = int(img_height * TOP_ROW_Y)
+        print("Top left of top row: (" + str(x) + ", " + str(y) + ").")
+        for char in range(CHARS_TOP_ROW):
+            cv2.rectangle(text_img, (x, y), (x + w, y + h), (255, 255, 0), 1)
+            x += w
+
+        x = int(img_width * BOT_ROW_X)
+        y = int(img_height * BOT_ROW_Y)
+        print("Top left of bottom row: (" + str(x) + ", " + str(y) + ").")
+        for char in range(CHARS_BOT_ROW):
+            cv2.rectangle(text_img, (x, y), (x + w, y + h), (255, 255, 0), 1)
+            x += w
+
+        return text_img
+
     def add_var(self, qua_rep):
         pos_noise = random.uniform(-POS_VAR, POS_VAR)
         #w_noise = random.uniform(-W_VAR, W_VAR)
@@ -118,22 +216,6 @@ class PlateGenerator:
         qua_rep[-1] += w_noise
         return qua_rep
 
-    def __init__(self):
-        image_topic = rospy.get_param("~image_topic", "/B1/rrbot/camera1/image_raw")
-        position_topic = rospy.get_param("~position_topic", "/spawn_position")
-        self.pos_pub = rospy.Publisher(position_topic, Float32MultiArray, queue_size=10)
-        self.image_sub = rospy.Subscriber(image_topic, Image, self.callback, queue_size=1)
-        self.plate_pics = []
-        self.cv_image = None
-        self.bridge = CvBridge()
-
-    def callback(self, data):
-        try:
-            self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
-        except CvBridgeError as e:
-            rospy.logerr(e)
-            return
-        return
 
 def main():
     rospy.init_node('plate_generator', anonymous=True)
@@ -147,13 +229,21 @@ def main():
         msg.data = position
         rospy.sleep(0.05)
         ic.pos_pub.publish(msg)
-        rospy.sleep(0.1)
-        extracted_plate_border = ic.extract_process_plate(ic.cv_image, SIGN_MASK)
-        extracted_plate = ic.extract_process_plate(extracted_plate_border, GRAY_MASK)
-        ic.plate_pics.append(extracted_plate)
-        text = ic.apply_mask(extracted_plate, TEXT_MASK)
-        cv2.imshow('Plate' + str(plate+1), text) # CONT here next 16:08
-        cv2.waitKey(10)
+        rospy.sleep(0.4)
+        poss_plate=ic.scan_sign(SIGN_MASK)
+        if poss_plate is not None:
+            poss_sign = ic.extract_process_plate(poss_plate, GRAY_MASK)
+            if poss_sign is not None:
+                extracted_text = ic.apply_mask(poss_sign, TEXT_MASK)
+                isolated_contours = ic.text_predefined_boxes(extracted_text)
+                ic.plate_pics.append(isolated_contours)
+                cv2.imshow('Plate' + str(plate+1), isolated_contours) # CONT here next 16:08
+                cv2.waitKey(10)
+            else:
+                print("Plate " + str(plate+1) + " didn't pass gray mask???")
+        else: 
+            print("Plate " + str(plate+1) + " Didn't pass blue mask?")
+        rospy.sleep(0.21)
 
     while(True):
         pass
