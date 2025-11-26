@@ -3,14 +3,18 @@
 from __future__ import print_function
 from typing import Tuple
 import rospy
+import math
 import random
+import csv
 import cv2
+import os
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray
 from cv_bridge import CvBridge, CvBridgeError
 from gazebo_msgs.msg import ModelState
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from PIL import ImageFont, ImageDraw
 
 # POSITIONS
 # [x, y, z, ox, oy, oz, w]
@@ -43,12 +47,13 @@ MIN_SIGN_AREA = 100
 OUTPUT_SHAPE = (800,400)
 # MASKS: [b_minus_g_upper, b_minus_g_lower, b_minus_r_upper,
 #         b_minus_r_lower, g_minus_r_upper, g_minus_r_lower]
-IDEAL_BRIGHTNESS = 100
 SIGN_MASK = [110, 90, 110, 90, 256, -256]
 GRAY_MASK = [10, -10, 10, -10, 10, -10]
-TEXT_MASK = [256, 55, 256, 55, 256, -256]
+TEXT_MASK = [256, 50, 256, 50, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
+CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
+OUTPUT_PATH = '/home/fizzer/labelled_chars'
 
 class PlateGenerator:
     """
@@ -170,21 +175,86 @@ class PlateGenerator:
                 return poss_plate
         return None
 
-    def isolate_letters(self, text_img):
+    def isolate_letters(self, text_img, clue, value):
+        img_to_show = np.copy(text_img)
         contours, _ = cv2.findContours(text_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        img_width, img_height = text_img.shape
+        upper_char_rects = []
+        lower_char_rects = []
+
+
+        img_height, img_width = img_to_show.shape
+ 
+        def store_in_right_row(x,y,w,h):
+            if y >= int(img_height / 2):
+                lower_char_rects.append((x,y,w,h))
+            else:
+                upper_char_rects.append((x,y,w,h))
+
         w = int(img_width * CHAR_WIDTH_PROP)
         h = int(img_height * CHAR_HEIGHT_PROP)
+        lastCharX = 0 # Tracks the left column of a given char, for handling of several contours in one letter.
+        print("Expected width: " + str(w) + " Expected height: " + str(h))
         for cnt in contours:
             x, y, _w, _h = cv2.boundingRect(cnt)
-            print("[top left](x,y): (" + str(x) + ", " + str(y) + "), (w, h): (" + str(_w) + ", " + str(_h) + ")")
-    
-            # Draw the rectangle on the original image
-            # (image, top-left corner, bottom-right corner, color, thickness)
-            cv2.rectangle(text_img, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
+            if _w > int(1.5 * w):
+                print("Width: " + str(_w))
+                chars_jumb = math.ceil(_w / w)
+                avg_width = int(_w / chars_jumb)
 
-        return text_img
+                for char_to_parse in range(chars_jumb):
+                    cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
+                    store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
+
+            # If a letter contains some contour that's very thin, that indicates to us it was chopped in several pieces.
+            elif _w < int(0.6 * w): 
+                # If we're sufficiently far from the beginning of the last letter, we know this is the first small chunk, so we manually create bounding box.
+                if (x - lastCharX) > int(0.8 * w): 
+                    # MIGHT FAIL ON Q? (unless we increase the default height of a letter)
+                    cv2.rectangle(img_to_show, (x, y), (x + w, y + h), (255, 255, 0), 1) 
+                    store_in_right_row(x, y, w, h)
+                    # Now, if there's another small contour in the same letter that's not part of the next letter, it won't get pass this if test, so no box will be drawn:)
+                    x = lastCharX 
+            else: 
+                # Draw the rectangle on the original image
+                # (image, top-left corner, bottom-right corner, color, thickness)
+                cv2.rectangle(img_to_show, (x, y), (x + _w, y + _h), (255, 255, 0), 1)  
+                store_in_right_row(x, y, _w, _h)
+
+        upper_char_rects.sort(key=lambda r: r[0])
+        lower_char_rects.sort(key=lambda r: r[0])
+
+        print("Upper character length: " + str(len(upper_char_rects)))
+
+        for char_idx in range(len(clue)):
+            x,y,w,h = upper_char_rects[char_idx]
+            print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
+            char_img = text_img[y:y+h, x:x+w]
+            char_name = clue + str(char_idx) + clue[char_idx] + ".png"
+            full_path = os.path.join(OUTPUT_PATH, char_name)
+            cv2.imwrite(full_path, self.pad32(char_img))
+
+
+        for char_idx in range(len(value)):
+            x,y,w,h = lower_char_rects[char_idx]
+            print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
+            char_img = text_img[y:y+h, x:x+w]
+            char_name = value + str(char_idx) + value[char_idx] + ".png"
+            full_path = os.path.join(OUTPUT_PATH, char_name)
+            cv2.imwrite(full_path, self.pad32(char_img))
+
+        return img_to_show
+
+    # From ChatGPT!
+    def pad32(self, img):
+        h, w = img.shape
+        if h>32 or w>32:
+            s = 32/max(h,w)
+            img = cv2.resize(img,(int(w*s),int(h*s)),cv2.INTER_NEAREST)
+            h,w = img.shape
+        t = (32-h)//2; b = 32-h-t
+        l = (32-w)//2; r = 32-w-l
+        return cv2.copyMakeBorder(img,t,b,l,r,cv2.BORDER_CONSTANT,0)
 
     def text_predefined_boxes(self, text_img):
         img_height, img_width = text_img.shape
@@ -216,15 +286,27 @@ class PlateGenerator:
         qua_rep[-1] += w_noise
         return qua_rep
 
+    def get_clues(self):
+        clues = []
+
+        with open(CSV_PATH, 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            for row in reader:
+                if row:
+                    clues.append(tuple(row))
+        return clues
+
 
 def main():
     rospy.init_node('plate_generator', anonymous=True)
     ic = PlateGenerator()
     position = [0,0,0,0,0,0,0]
+    clues = ic.get_clues()
     msg = Float32MultiArray()
     rospy.sleep(0.3)
     for plate in range(len(POS_PLATES)):
         #position = ic.add_var(ic.eul_to_qua(POS_PLATES[plate]))
+        print("Topic: " + clues[plate][0] + ", Clue: " + clues[plate][1])
         position = ic.eul_to_qua(POS_PLATES[plate])
         msg.data = position
         rospy.sleep(0.05)
@@ -235,7 +317,8 @@ def main():
             poss_sign = ic.extract_process_plate(poss_plate, GRAY_MASK)
             if poss_sign is not None:
                 extracted_text = ic.apply_mask(poss_sign, TEXT_MASK)
-                isolated_contours = ic.text_predefined_boxes(extracted_text)
+                isolated_contours = ic.isolate_letters(extracted_text, clues[plate][0], clues[plate][1])
+                #isolated_contours = ic.text_predefined_boxes(extracted_text)
                 ic.plate_pics.append(isolated_contours)
                 cv2.imshow('Plate' + str(plate+1), isolated_contours) # CONT here next 16:08
                 cv2.waitKey(10)
