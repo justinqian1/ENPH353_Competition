@@ -19,6 +19,7 @@ def find_features(image):
     line2_mask=(channel_r>185) & (channel_r<220) & (channel_g>185) & (channel_g<220) & (channel_b>130) & (channel_b<170)
     line_mask=line1_mask | line2_mask
     road_mask=(b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0) & (channel_b>=80) & (channel_b<=90)
+    road_mask[:180,:]=False # don't consider road at top
     #sign_mask=(b_minus_g>90) & (b_minus_g<110) & (b_minus_r>90) & (b_minus_r<110)
     red_line_mask=(channel_r>245) & (channel_b<10) & (channel_g<10)
     pink_line_mask=(channel_r>245) & (channel_b>245) & (channel_g<10)
@@ -27,6 +28,7 @@ def find_features(image):
     ped_mask[:,:50]=False # no ped on sides
     ped_mask[:,-50:]=False
     truck_mask=(channel_b>120) & (channel_b<240) & (b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0)
+    truck_mask[:,:80]=False # TEMP, stop signs detected as truck
 
     features_mask=np.zeros(image.shape,dtype=np.uint8)
     features_mask[210:,140:145,2]=80 # driving box 1
@@ -44,27 +46,28 @@ def find_features(image):
     features_mask[ped_mask]=100
     features_mask[truck_mask]=200
     #cv2.imwrite('/tmp/frame.png',image)
-    cv2.imshow('camera feed', image)
+    #cv2.imshow('camera feed', image)
     cv2.imshow('line',features_mask)
     cv2.waitKey(1)
 
     # decide if line is directly in front of robot (need to turn)
     line_in_front=np.sum(line_mask[210:240,140:180])+np.sum(line_mask[240:,70:250]) 
     line_left=np.where(line_mask[:,0])[0]
-    line_left_coord=line_left[-3] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
+    line_left_coord=line_left[-2] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
     line_mid=np.where(line_mask[:,160])[0]
     line_mid_coord=line_mid[-1] if len(line_mid)>=2 else -1 # thresholding based on length 2 but choosing last px for middle
     line_right=np.where(line_mask[:,-1])[0]
-    line_right_coord=line_right[-3] if len(line_right)>=3 else -1
+    line_right_coord=line_right[-2] if len(line_right)>=3 else -1
     road_left=np.where(road_mask[:,0])[0]
-    road_left_coord=road_left[3] if len(road_left)>=3 else -1 # use -3 to avoid outliers/noise
+    road_left_coord=road_left[2] if len(road_left)>=3 else -1 # use -3 to avoid outliers/noise
+    road_sz=np.sum(road_mask[:])
     red_line_sz=np.sum(red_line_mask[:])
     pink_line_sz=np.sum(pink_line_mask[:])
     ped_sz=np.sum(ped_mask[:])
     truck_sz=np.sum(truck_mask[:])
     #sign_size=np.sum(sign_mask[:])
 
-    return [line_in_front,line_left_coord,line_mid_coord,line_right_coord,red_line_sz,pink_line_sz,ped_sz,truck_sz,road_left_coord]
+    return [line_in_front,line_left_coord,line_mid_coord,line_right_coord,red_line_sz,pink_line_sz,ped_sz,truck_sz,road_sz,road_left_coord]
     
 class LineDetector:
     """
