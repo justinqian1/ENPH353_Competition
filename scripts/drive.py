@@ -33,7 +33,7 @@ LINE_M_LOOP_TH=200 # line middle in the loop (i.e. begin hardcode truck portion)
 LINE_LR_LOOP_TH=200 # left and right thresholds for loop
 LINE_LR_DIFF_TH=30 # diff bw left and right lines to trigger pid driving
 RED_LN_TH=2000 # num px of red line needed
-PINK_LN_TH=2000 # same for pink line
+PINK_LN_TH=1000 # same for pink line
 PED_TH=20 # num px of ped to count as seen
 ROAD_SZ_TH=42_000 # num px of road to start seq to enter loop
 TRUCK_STOP_TH=1100 # num px in truck to stop for it
@@ -48,23 +48,42 @@ class Driver:
     def __init__(self):
         self.data = rospy.Subscriber('/drive_info',Int32MultiArray, callback=self.callback,queue_size=1)
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
+        self.loc_pub = rospy.Publisher('/B1/loc', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
+        self.section=1 # sections 1,2,3,
+        self.latest_data=None
         self.state = States.FWD 
+
         self.past_ped=False
         self.exit_loop_time=rospy.Time.now()+rospy.Duration(10000)
         self.past_loop=False
+
         self.forward_speed = 2.0
         self.fwd_lock_speed = 6.0 # it's locked anyway
         self.fwd_left_lock_lin_speed = 4.0
         self.turn_speed = 6.0
         self.align_speed = 1.5
 
+        self.timer = rospy.Timer(rospy.Duration(0.05), self.drive)
+
         self.time_pub.publish(start_timer)
         #self.start_time = rospy.Time.now()
         #self.duration = rospy.Duration(120.0) # drive for 10 s
 
     def callback(self, msg):
-        line_fwd,line_L,line_M,line_R,red_ln,pink_ln,ped,truck,road_sz,road_L=msg.data
+        self.latest_data=msg.data
+    
+    def drive(self,event):
+        data=self.latest_data
+        if data is None:
+            return
+        if self.section==1:
+            self.driving_section1(data)
+        elif self.section==2:
+            self.driving_section2(data)
+
+    def driving_section1(self,data):
+        line_fwd,line_L,line_M,line_R,red_ln,pink_ln,ped,truck,road_sz,road_L=data
         now=rospy.Time.now()
         if self.state in [States.FWD,States.FWD_LEFT,States.FWD_RIGHT]:
             if red_ln>RED_LN_TH and not self.past_ped: # STOP FOR PED
@@ -115,6 +134,7 @@ class Driver:
             if pink_ln>PINK_LN_TH: # CASE: pink ln
                 self.state=States.STOP_END
                 self.time_pub.publish(stop_timer)
+                self.loc_pub.publish('1')
             else: # CASE: PED
                 if ped > PED_TH:
                     self.state=States.STOP_PED_SEEN

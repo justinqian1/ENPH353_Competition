@@ -7,7 +7,7 @@ from std_msgs.msg import Int32MultiArray
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
 
-def find_features(image):
+def find_features_part1(image):
     channel_b=image[:,:,0]
     channel_g=image[:,:,1]
     channel_r=image[:,:,2]
@@ -15,9 +15,9 @@ def find_features(image):
     b_minus_r=channel_b-channel_r
     g_minus_r=channel_g-channel_r
 
-    line1_mask=(channel_b>245) & (channel_g>245) & (channel_r>245)
-    line2_mask=(channel_r>185) & (channel_r<220) & (channel_g>185) & (channel_g<220) & (channel_b>130) & (channel_b<170)
-    line_mask=line1_mask | line2_mask
+    line_mask=(channel_b>245) & (channel_g>245) & (channel_r>245)
+    #line2_mask=(channel_r>185) & (channel_r<220) & (channel_g>185) & (channel_g<220) & (channel_b>130) & (channel_b<170)
+    #line_mask=line1_mask | line2_mask
     road_mask=(b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0) & (channel_b>=80) & (channel_b<=90)
     road_mask[:180,:]=False # don't consider road at top
     #sign_mask=(b_minus_g>90) & (b_minus_g<110) & (b_minus_r>90) & (b_minus_r<110)
@@ -94,9 +94,8 @@ class LineDetector:
         except CvBridgeError as e:
             rospy.logerr(e)
             return
-        find_features(cv_image)
         msg = Int32MultiArray()
-        msg.data = find_features(cv_image)
+        msg.data = find_features_part1(cv_image)
         self.result_pub.publish(msg)
 
 def main():
