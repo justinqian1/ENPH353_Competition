@@ -27,8 +27,7 @@ def find_features(image):
     ped_mask[:150,:]=False # no ped at top of scrn
     ped_mask[:,:50]=False # no ped on sides
     ped_mask[:,-50:]=False
-    truck_mask=(channel_b>120) & (channel_b<240) & (b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0)
-    truck_mask[:,:80]=False # TEMP, stop signs detected as truck
+    truck_mask=(channel_b>110) & (channel_b<195) & (b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0)
 
     features_mask=np.zeros(image.shape,dtype=np.uint8)
     features_mask[210:,140:145,2]=80 # driving box 1
@@ -44,9 +43,9 @@ def find_features(image):
     features_mask[:,:,0][pink_line_mask]=255
     features_mask[:,:,2][pink_line_mask]=255
     features_mask[ped_mask]=100
-    features_mask[truck_mask]=200
+    features_mask[truck_mask]=150
     #cv2.imwrite('/tmp/frame.png',image)
-    #cv2.imshow('camera feed', image)
+    cv2.imshow('camera feed', image)
     cv2.imshow('line',features_mask)
     cv2.waitKey(1)
 
