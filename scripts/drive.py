@@ -16,7 +16,6 @@ class States(Enum):
     ALIGN_LEFT=auto()
     ALIGN_RIGHT=auto()
     STOP_TEMP=auto() # only for transitioning bw fwd/turn
-    STOP_PED_NOTSEEN=auto()
     STOP_PED_SEEN=auto()
     STOP_TRUCK=auto()
     STOP_END=auto()
@@ -24,13 +23,13 @@ class States(Enum):
 start_timer = String('team,pass,0,whatever')
 stop_timer = String('team,pass,-1,whatever')
 
+SEC1_DATA_LEN=10 # arr of length 10 for sec 1
+
 LINE_FWD_BOX_TH=5 # num px in driving box
 LINE_EDGE_TOL=30 # diff bw lineL and lineR to go back to moving fwd
 LINE_ALIGN_TOL=10 # diff bw lineL and lineR to require aligning
 LINE_MID_DIFF_TH=10 # threshold for line middle vs side (to decide to go fwd+left/fwd+right)
 LINE_M_TH=190 # y threshold for line middle to matter
-LINE_M_LOOP_TH=200 # line middle in the loop (i.e. begin hardcode truck portion)
-LINE_LR_LOOP_TH=200 # left and right thresholds for loop
 LINE_LR_DIFF_TH=30 # diff bw left and right lines to trigger pid driving
 RED_LN_TH=2000 # num px of red line needed
 PINK_LN_TH=1000 # same for pink line
@@ -50,7 +49,7 @@ class Driver:
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
         self.loc_pub = rospy.Publisher('/B1/loc', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
-        self.section=1 # sections 1,2,3,
+        self.section='1' # sections 1,2,3,4
         self.latest_data=None
         self.state = States.FWD 
 
@@ -61,7 +60,7 @@ class Driver:
         self.forward_speed = 2.0
         self.fwd_lock_speed = 6.0 # it's locked anyway
         self.fwd_left_lock_lin_speed = 4.0
-        self.turn_speed = 6.0
+        self.turn_speed = 5.5
         self.align_speed = 1.5
 
         self.timer = rospy.Timer(rospy.Duration(0.05), self.drive)
@@ -77,10 +76,19 @@ class Driver:
         data=self.latest_data
         if data is None:
             return
-        if self.section==1:
+        if self.section=='1' and len(data)==SEC1_DATA_LEN:
             self.driving_section1(data)
-        elif self.section==2:
+        elif self.section=='2':
             self.driving_section2(data)
+
+        '''
+        elapsed = rospy.Time.now() - self.start_time
+        if elapsed > self.duration:
+            self.state=States.STOP_MAXTIME
+            self.drive_pub.publish(Twist())
+            self.time_pub.publish(stop_timer)
+            return
+        '''
 
     def driving_section1(self,data):
         line_fwd,line_L,line_M,line_R,red_ln,pink_ln,ped,truck,road_sz,road_L=data
@@ -132,9 +140,7 @@ class Driver:
         elif (self.state == States.ALIGN_LEFT and line_L > line_R-LINE_ALIGN_TOL) or \
              (self.state == States.ALIGN_RIGHT and line_R > line_L-LINE_ALIGN_TOL):
             if pink_ln>PINK_LN_TH: # CASE: pink ln
-                self.state=States.STOP_END
-                self.time_pub.publish(stop_timer)
-                self.loc_pub.publish('1')
+                self.switch_section('2')
             else: # CASE: PED
                 if ped > PED_TH:
                     self.state=States.STOP_PED_SEEN
@@ -149,14 +155,11 @@ class Driver:
                 elif line_R > line_L+LINE_ALIGN_TOL:
                     self.state=States.ALIGN_LEFT
                 else:
-                    self.state=States.STOP_END
-                    self.time_pub.publish(stop_timer)
+                    self.switch_section('2')
             elif line_fwd>LINE_FWD_BOX_TH: # fwd -> turn
                 self.state=States.RIGHT if line_L > line_R else States.LEFT
             else: # turn -> fwd
                 self.state=States.FWD
-        elif self.state==States.STOP_PED_NOTSEEN and ped > PED_TH: # ped not yet crossed -> ped crossing
-            self.state=States.STOP_PED_SEEN
         elif self.state==States.STOP_PED_SEEN and ped < PED_TH: # ped crossing -> ped done crossing
             self.state=States.FWD_LOCK
             self.past_ped=True
@@ -165,15 +168,6 @@ class Driver:
             self.state=States.STOP_TEMP
         elif self.state in [States.FWD_LOCK,States.FWD_LEFT_LOCK1, States.FWD_LEFT_LOCK2] and now > self.locked_until: # done locking
             self.state=States.STOP_TEMP
-
-        '''
-        elapsed = rospy.Time.now() - self.start_time
-        if elapsed > self.duration:
-            self.state=States.STOP_MAXTIME
-            self.drive_pub.publish(Twist())
-            self.time_pub.publish(stop_timer)
-            return
-        '''
 
         twist = Twist()
         if self.state == States.FWD:
@@ -219,6 +213,16 @@ class Driver:
             twist.angular.z = 0
         print(f"{self.state} | Line: {(line_fwd,line_L,line_M,line_R)} | Misc: {(red_ln,pink_ln,ped,truck,road_sz,road_L)}")
         self.drive_pub.publish(twist)
+    
+    def driving_section2(self,data):
+        print(data)
+    
+    def switch_section(self,new_section):
+        self.section=new_section
+        if new_section=='2':
+            self.state=States.STOP_END
+            self.time_pub.publish(stop_timer)
+            self.loc_pub.publish('2')
 
 def main():
     rospy.init_node('driver')
