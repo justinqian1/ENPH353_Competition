@@ -3,16 +3,18 @@
 from __future__ import print_function
 import rospy
 import cv2
+import math
+import tensorflow as tf
 from sensor_msgs.msg import Image
 from time import time
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Int32MultiArray, String
 from std_msgs.msg import Int32, Float32
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
 
 SIGN_MASK = [110, 90, 110, 90, 256, -256]
 GRAY_MASK = [10, -10, 10, -10, 10, -10]
-TEXT_MASK = [256, 30, 256, 30, 256, -256]
+TEXT_MASK = [256, 50, 256, 50, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
 MIN_BLUE_COUNT = 10000
@@ -30,6 +32,13 @@ TOP_ROW_X = 332/800
 CHARS_TOP_ROW = 7
 CHARS_BOT_ROW = 12
 
+MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
+POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
+              'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 
+              'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6',
+              '7', '8', '9'
+              ]
+
 
 class PlateDetector:
     """
@@ -40,9 +49,18 @@ class PlateDetector:
     """
 
     def __init__(self):
+        # Load the TFLite model
+        self.interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+        self.interpreter.allocate_tensors()
+
+        # Get input/output indices
+        self.input_index = self.interpreter.get_input_details()[0]["index"]
+        self.output_index = self.interpreter.get_output_details()[0]["index"]
+
         self.curr_plate = 1
         self.last_scan_time = time()
 
+        self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
         self.pixel_pub = rospy.Publisher("/plate/pixel_count", Int32, queue_size=10)
         self.area_pub = rospy.Publisher("/plate/largest_area", Int32, queue_size=10)
 
@@ -69,8 +87,7 @@ class PlateDetector:
             poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
             if poss_sign is not None:                
                 extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
-                #isolated_contours = self.isolate_letters(extracted_text)
-                isolated_contours = self.text_predefined_boxes(extracted_text)
+                isolated_contours = self.isolate_letters(extracted_text)
                 cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
                 cv2.waitKey(3)
                 self.curr_plate += 1
@@ -176,7 +193,11 @@ class PlateDetector:
 
     def scan_sign(self, mask, min_count, min_area):
         """
-
+        @brief Scans for sign across two cameras according to mask and external processing method result.
+        @param mask the mask to apply to locate rectangular sign.
+        @param min_count mask dependent for passing into extract_process_plate
+        @param min_area mask dependent for passing into extract_process_plate
+        @return None if no sign is found, cvimage of sign otherwise.
         """
         images = [self.left_image, self.right_image]
 
@@ -187,43 +208,101 @@ class PlateDetector:
         return None
 
     def isolate_letters(self, text_img):
+        """
+        @brief Extracts and sorts letters contained in images.
+        @param text_img the binary image to pull letters from.
+        @returns modified text_img with rectangles around each detected letter.
+        """
+
+        img_to_show = np.copy(text_img)
         contours, _ = cv2.findContours(text_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        img_width, img_height = text_img.shape
+        upper_char_rects = []
+        lower_char_rects = []
+        
+        def store_in_right_row(x,y,w,h):
+            if y >= int(img_height / 2):
+                lower_char_rects.append((x,y,w,h))
+            else:
+                upper_char_rects.append((x,y,w,h))
+
+        img_height, img_width = img_to_show.shape
+
         w = int(img_width * CHAR_WIDTH_PROP)
         h = int(img_height * CHAR_HEIGHT_PROP)
+        lastCharX = 0
+
         for cnt in contours:
             x, y, _w, _h = cv2.boundingRect(cnt)
-            print("[top left](x,y): (" + str(x) + ", " + str(y) + "), (w, h): (" + str(_w) + ", " + str(_h) + ")")
-    
-            # Draw the rectangle on the original image
-            # (image, top-left corner, bottom-right corner, color, thickness)
-            cv2.rectangle(text_img, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
+            #print("[top left](x,y): (" + str(x) + ", " + str(y) + "), (w, h): (" + str(_w) + ", " + str(_h) + ")")
+            if _w > int(1.5 * w):
+                #print("Width: " + str(_w))
+                chars_jumb = math.ceil(_w / w)
+                avg_width = int(_w / chars_jumb)
+
+                for char_to_parse in range(chars_jumb):
+                    cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
+                    store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
+
+            elif _w < int(0.6 * w):
+                if (x - lastCharX) > int(0.8 * w):
+                    cv2.rectangle(img_to_show, (x, y), (x + w, y + h), (255, 255, 0), 1)
+                    store_in_right_row(x, y, w, h)
+                    x = lastCharX
+            else:
+                cv2.rectangle(img_to_show, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
+                store_in_right_row(x, y, _w, _h)
+
+        upper_char_rects.sort(key=lambda r: r[0])
+        lower_char_rects.sort(key=lambda r: r[0])
+
+        def prepare_char_imgs(char_rects):
+            input_imgs = []
+
+            for char_idx in range(len(char_rects)):
+                x,y,w,h = char_rects[char_idx]
+                char_img = text_img[y:y+h, x:x+w]
+                cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
+                cnn_input = np.expand_dims(cnn_input, axis=-1)
+                input_imgs.append(cnn_input)
+
+            return input_imgs
+
+        upper_input_imgs = prepare_char_imgs(upper_char_rects)
+        lower_input_imgs = prepare_char_imgs(lower_char_rects)
+
+        clue_pred = self.predict_word(upper_input_imgs)
+        value_pred = self.predict_word(lower_input_imgs)
+
+        message = clue_pred + ', ' + value_pred
+        self.time_pub.publish(message)
+        print(message)
 
         return text_img
 
-    def text_predefined_boxes(self, text_img):
-        img_height, img_width = text_img.shape
-        print("Image width: " + str(img_width) + " Image height: " + str(img_height))
-        w = int(img_width * CHAR_WIDTH_PROP)
-        h = int(img_height * CHAR_HEIGHT_PROP)
-        x = int(img_width * TOP_ROW_X)
-        y = int(img_height * TOP_ROW_Y)
-        print("Top left of top row: (" + str(x) + ", " + str(y) + ").")
-        for char in range(CHARS_TOP_ROW):
-            cv2.rectangle(text_img, (x, y), (x + w, y + h), (255, 255, 0), 1)
-            x += w
+    # From ChatGPT!
+    def pad32(self, img):
+        h, w = img.shape
+        if h>32 or w>32:
+            s = 32/max(h,w)
+            img = cv2.resize(img,(int(w*s),int(h*s)),cv2.INTER_NEAREST)
+            h,w = img.shape
+        t = (32-h)//2; b = 32-h-t
+        l = (32-w)//2; r = 32-w-l
+        return cv2.copyMakeBorder(img,t,b,l,r,cv2.BORDER_CONSTANT,0)
 
-        x = int(img_width * BOT_ROW_X)
-        y = int(img_height * BOT_ROW_Y)
-        print("Top left of bottom row: (" + str(x) + ", " + str(y) + ").")
-        for char in range(CHARS_BOT_ROW):
-            cv2.rectangle(text_img, (x, y), (x + w, y + h), (255, 255, 0), 1)
-            x += w
+    def predict_word(self, images):
+        chars = []
+        for img in images:
+            input_tensor = np.expand_dims(img, axis=0)
+            self.interpreter.set_tensor(self.input_index, input_tensor)
+            self.interpreter.invoke()
+            output = self.interpreter.get_tensor(self.output_index)
+            predicted_char = POSS_CHARS[np.argmax(output[0])]
+            chars.append(predicted_char)
 
-        return text_img
-
-
+        pred_string = ''.join(chars)
+        return pred_string
 
 def main():
     rospy.init_node('plate_detector', anonymous=True)

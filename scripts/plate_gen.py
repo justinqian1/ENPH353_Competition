@@ -8,6 +8,7 @@ import random
 import csv
 import cv2
 import os
+import tensorflow as tf
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray
 from cv_bridge import CvBridge, CvBridgeError
@@ -53,7 +54,13 @@ TEXT_MASK = [256, 50, 256, 50, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
 CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
-OUTPUT_PATH = '/home/fizzer/labelled_chars'
+OUTPUT_PATH = '/home/fizzer/cnn_train/labelled_chars'
+MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
+POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
+              'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 
+              'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6',
+              '7', '8', '9'
+              ]
 
 class PlateGenerator:
     """
@@ -64,6 +71,14 @@ class PlateGenerator:
     """
 
     def __init__(self):
+        # Load the TFLite model
+        self.interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+        self.interpreter.allocate_tensors()
+
+        # Get input/output indices
+        self.input_index = self.interpreter.get_input_details()[0]["index"]
+        self.output_index = self.interpreter.get_output_details()[0]["index"]
+
         position_topic = rospy.get_param("~position_topic", "/spawn_position")
         self.pos_pub = rospy.Publisher(position_topic, Float32MultiArray, queue_size=10)
 
@@ -117,7 +132,7 @@ class PlateGenerator:
         contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
-            cv2.imshow("Failed blue mask: ", frame)
+            #cv2.imshow("Failed blue mask: ", frame)
             return None
 
         sign_cnt = max(contours, key=cv2.contourArea)
@@ -127,7 +142,7 @@ class PlateGenerator:
 
         # If the shape of the largest contour isn't a rectangle, it's likely some of the border is off the screen, so we shouldn't trust that the text will be fully included.
         if len(approx) != 4:
-            cv2.imshow("Blue mask passed num count, not contour shape: ", frame)
+            #cv2.imshow("Blue mask passed num count, not contour shape: ", frame)
             return None
 
         corners = approx.reshape(4, 2).astype(np.float32)
@@ -182,7 +197,6 @@ class PlateGenerator:
         upper_char_rects = []
         lower_char_rects = []
 
-
         img_height, img_width = img_to_show.shape
  
         def store_in_right_row(x,y,w,h):
@@ -224,26 +238,57 @@ class PlateGenerator:
         upper_char_rects.sort(key=lambda r: r[0])
         lower_char_rects.sort(key=lambda r: r[0])
 
+        upper_input_imgs = []
+        lower_input_imgs = []
+
         print("Upper character length: " + str(len(upper_char_rects)))
 
         for char_idx in range(len(clue)):
             x,y,w,h = upper_char_rects[char_idx]
-            print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
+            #print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
             char_img = text_img[y:y+h, x:x+w]
             char_name = clue + str(char_idx) + clue[char_idx] + ".png"
             full_path = os.path.join(OUTPUT_PATH, char_name)
-            cv2.imwrite(full_path, self.pad32(char_img))
+            cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
+            cnn_input = np.expand_dims(cnn_input, axis=-1)
+            print(cnn_input.shape)
+            upper_input_imgs.append(cnn_input)
+ 
+            #cv2.imwrite(full_path, self.pad32(char_img), [cv2.IMWRITE_PNG_BILEVEL, 1])
 
 
         for char_idx in range(len(value)):
             x,y,w,h = lower_char_rects[char_idx]
-            print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
+            #print("Top left corner: (" + str(x) + ", " + str(y) + "), Width: " + str(w) + ", Height: " + str(h))
             char_img = text_img[y:y+h, x:x+w]
             char_name = value + str(char_idx) + value[char_idx] + ".png"
             full_path = os.path.join(OUTPUT_PATH, char_name)
-            cv2.imwrite(full_path, self.pad32(char_img))
+            cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
+            cnn_input = np.expand_dims(cnn_input, axis=-1)
+            print(cnn_input.shape)
+            lower_input_imgs.append(cnn_input)
+
+            #cv2.imwrite(full_path, self.pad32(char_img), [cv2.IMWRITE_PNG_BILEVEL, 1])
+
+        clue_pred = self.predict_word(upper_input_imgs)
+        value_pred = self.predict_word(lower_input_imgs)
+        print("Predicted clue: " + clue_pred + " Predicted value: " + value_pred)
 
         return img_to_show
+
+    def predict_word(self, images):
+        chars = []
+        for img in images:
+            input_tensor = np.expand_dims(img, axis=0)
+            self.interpreter.set_tensor(self.input_index, input_tensor)
+            self.interpreter.invoke()
+            output = self.interpreter.get_tensor(self.output_index)
+            predicted_char = POSS_CHARS[np.argmax(output[0])]
+            chars.append(predicted_char)
+
+        pred_string = ''.join(chars)
+        return pred_string
+
 
     # From ChatGPT!
     def pad32(self, img):
