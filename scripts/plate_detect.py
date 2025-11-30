@@ -21,6 +21,7 @@ MIN_BLUE_COUNT = 10000
 MIN_PLATE_AREA = 24000
 MIN_SIGN_COUNT = 100
 MIN_SIGN_AREA = 100
+MIN_CNT_SIZE = 50
 OUTPUT_SHAPE = (800,400)
 COOL_DOWN_TIME = 5.0
 CHAR_WIDTH_PROP = 0.077
@@ -32,6 +33,11 @@ TOP_ROW_X = 332/800
 CHARS_TOP_ROW = 7
 CHARS_BOT_ROW = 12
 
+TEAMID = "team5"
+PASSWORD = "password"
+
+CLUE_TOPICS = {'SIZE': 1, 'VICTIM': 2, 'CRIME': 3, 'TIME': 4, 'PLACE': 5, 'MOTIVE': 6, 'WEAPON': 7, 'BANDIT': 8}
+OUTPUT_PATH = '/home/fizzer/cnn_train/labelled_chars'
 MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
 POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
               'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 
@@ -60,6 +66,7 @@ class PlateDetector:
         self.curr_plate = 1
         self.last_scan_time = time()
 
+        self.location_pub = rospy.Publisher('/location', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
         self.pixel_pub = rospy.Publisher("/plate/pixel_count", Int32, queue_size=10)
         self.area_pub = rospy.Publisher("/plate/largest_area", Int32, queue_size=10)
@@ -87,7 +94,7 @@ class PlateDetector:
             poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
             if poss_sign is not None:                
                 extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
-                isolated_contours = self.isolate_letters(extracted_text)
+                isolated_contours = self.find_word(extracted_text)
                 cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
                 cv2.waitKey(3)
                 self.curr_plate += 1
@@ -207,7 +214,7 @@ class PlateDetector:
                 return poss_plate
         return None
 
-    def isolate_letters(self, text_img):
+    def find_word(self, text_img):
         """
         @brief Extracts and sorts letters contained in images.
         @param text_img the binary image to pull letters from.
@@ -233,10 +240,11 @@ class PlateDetector:
         lastCharX = 0
 
         for cnt in contours:
+            if cv2.contourArea(cnt) < MIN_CNT_SIZE:
+                continue
+
             x, y, _w, _h = cv2.boundingRect(cnt)
-            #print("[top left](x,y): (" + str(x) + ", " + str(y) + "), (w, h): (" + str(_w) + ", " + str(_h) + ")")
             if _w > int(1.5 * w):
-                #print("Width: " + str(_w))
                 chars_jumb = math.ceil(_w / w)
                 avg_width = int(_w / chars_jumb)
 
@@ -244,7 +252,7 @@ class PlateDetector:
                     cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
                     store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
 
-            elif _w < int(0.6 * w):
+            elif _w < int(0.4 * w):
                 if (x - lastCharX) > int(0.8 * w):
                     cv2.rectangle(img_to_show, (x, y), (x + w, y + h), (255, 255, 0), 1)
                     store_in_right_row(x, y, w, h)
@@ -256,29 +264,35 @@ class PlateDetector:
         upper_char_rects.sort(key=lambda r: r[0])
         lower_char_rects.sort(key=lambda r: r[0])
 
-        def prepare_char_imgs(char_rects):
-            input_imgs = []
+        clue_pred = self.cnn_proc(text_img, upper_char_rects, w)
+        value_pred = self.cnn_proc(text_img, lower_char_rects, w)
 
-            for char_idx in range(len(char_rects)):
-                x,y,w,h = char_rects[char_idx]
-                char_img = text_img[y:y+h, x:x+w]
-                cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
-                cnn_input = np.expand_dims(cnn_input, axis=-1)
-                input_imgs.append(cnn_input)
+        if clue_pred in CLUE_TOPICS.keys():
+            self.curr_plate = CLUE_TOPICS[clue_pred]
 
-            return input_imgs
-
-        upper_input_imgs = prepare_char_imgs(upper_char_rects)
-        lower_input_imgs = prepare_char_imgs(lower_char_rects)
-
-        clue_pred = self.predict_word(upper_input_imgs)
-        value_pred = self.predict_word(lower_input_imgs)
-
+        rlmsg = TEAMID + ',' + PASSWORD + ',' + str(self.curr_plate) + ',' + value_pred
         message = clue_pred + ', ' + value_pred
-        self.time_pub.publish(message)
+        self.time_pub.publish(rlmsg)
         print(message)
 
-        return text_img
+        return img_to_show 
+    
+    def cnn_proc(self, text_img, char_rects, avg_w):
+        input_imgs = []
+        last_x = char_rects[0][0]
+        space_indices = []
+
+        for char_idx in range(len(char_rects)):
+            x,y,w,h = char_rects[char_idx]
+            if x - last_x > int(1.5 * avg_w):
+                space_indices.append(char_idx)
+            last_x = x
+            char_img = text_img[y:y+h, x:x+w]
+            cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
+            cnn_input = np.expand_dims(cnn_input, axis=-1)
+            input_imgs.append(cnn_input)
+
+        return self.predict_word(input_imgs, space_indices)
 
     # From ChatGPT!
     def pad32(self, img):
@@ -291,10 +305,13 @@ class PlateDetector:
         l = (32-w)//2; r = 32-w-l
         return cv2.copyMakeBorder(img,t,b,l,r,cv2.BORDER_CONSTANT,0)
 
-    def predict_word(self, images):
+    def predict_word(self, images, space_indices):
         chars = []
-        for img in images:
-            input_tensor = np.expand_dims(img, axis=0)
+
+        for img_idx in range(len(images)):
+            if img_idx in space_indices:
+                chars.append(' ')
+            input_tensor = np.expand_dims(images[img_idx], axis=0)
             self.interpreter.set_tensor(self.input_index, input_tensor)
             self.interpreter.invoke()
             output = self.interpreter.get_tensor(self.output_index)
@@ -302,6 +319,7 @@ class PlateDetector:
             chars.append(predicted_char)
 
         pred_string = ''.join(chars)
+
         return pred_string
 
 def main():
