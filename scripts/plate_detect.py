@@ -99,8 +99,9 @@ class PlateDetector:
         if poss_plate is not None:
             poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
             if poss_sign is not None:                
-                extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
-                isolated_contours = self.find_word(extracted_text)
+                # extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
+                # isolated_contours = self.find_word(extracted_text)
+                isolated_contours = self.find_word(poss_sign, TEXT_MASK)
                 cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
                 cv2.waitKey(3)
                 self.curr_plate += 1
@@ -220,13 +221,14 @@ class PlateDetector:
                 return poss_plate
         return None
 
-    def find_word(self, text_img):
+    def find_word(self, sign_img, text_mask):
         """
         @brief Extracts and sorts letters contained in images.
         @param text_img the binary image to pull letters from.
         @returns modified text_img with rectangles around each detected letter.
-        """
+        """ 
 
+        text_img = self.apply_mask(sign_img, text_mask)
         img_to_show = np.copy(text_img)
         contours, _ = cv2.findContours(text_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -258,11 +260,11 @@ class PlateDetector:
                     cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
                     store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
 
-            elif _w < int(0.4 * w):
-                if (x - lastCharX) > int(0.8 * w):
-                    cv2.rectangle(img_to_show, (x, y), (x + w, y + h), (255, 255, 0), 1)
-                    store_in_right_row(x, y, w, h)
-                    x = lastCharX
+            elif _w < int(0.4 * w) or _h < int(0.6 * h):
+                text_mask[1] -= 5
+                text_mask[3] -= 5
+                print("Recursively calling with a weaker mask to prevent fraying!")
+                return self.find_word(sign_img, text_mask)
             else:
                 cv2.rectangle(img_to_show, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
                 store_in_right_row(x, y, _w, _h)
