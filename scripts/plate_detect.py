@@ -253,13 +253,18 @@ class PlateDetector:
 
             x, y, _w, _h = cv2.boundingRect(cnt)
             if _w > int(1.5 * w):
+                text_mask[1] += 5
+                text_mask[3] += 5
+                print("Recursively calling with a stronger mask to prevent jumbling")
+                return self.find_word(sign_img, text_mask)
+                '''
                 chars_jumb = math.ceil(_w / w)
                 avg_width = int(_w / chars_jumb)
 
                 for char_to_parse in range(chars_jumb):
                     cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
                     store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
-
+                '''
             elif _w < int(0.4 * w) or _h < int(0.6 * h):
                 text_mask[1] -= 5
                 text_mask[3] -= 5
