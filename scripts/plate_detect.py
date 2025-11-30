@@ -3,7 +3,9 @@
 from __future__ import print_function
 import rospy
 import cv2
+import csv
 import math
+import os
 import tensorflow as tf
 from sensor_msgs.msg import Image
 from time import time
@@ -37,7 +39,8 @@ TEAMID = "team5"
 PASSWORD = "password"
 
 CLUE_TOPICS = {'SIZE': 1, 'VICTIM': 2, 'CRIME': 3, 'TIME': 4, 'PLACE': 5, 'MOTIVE': 6, 'WEAPON': 7, 'BANDIT': 8}
-OUTPUT_PATH = '/home/fizzer/cnn_train/labelled_chars'
+CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
+OUTPUT_PATH = '/home/fizzer/cnn_train/live_gen_chars'
 MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
 POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
               'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 
@@ -65,6 +68,9 @@ class PlateDetector:
 
         self.curr_plate = 1
         self.last_scan_time = time()
+
+        #For CNN training!
+        self.clues = self.get_clues()
 
         self.location_pub = rospy.Publisher('/location', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
@@ -264,11 +270,14 @@ class PlateDetector:
         upper_char_rects.sort(key=lambda r: r[0])
         lower_char_rects.sort(key=lambda r: r[0])
 
-        clue_pred = self.cnn_proc(text_img, upper_char_rects, w)
-        value_pred = self.cnn_proc(text_img, lower_char_rects, w)
+        clue_pred = self.cnn_proc(text_img, upper_char_rects, w, "")
 
         if clue_pred in CLUE_TOPICS.keys():
             self.curr_plate = CLUE_TOPICS[clue_pred]
+        else:
+            self.curr_plate = CLUE_TOPICS[self.closest_clue(clue_pred)]
+
+        value_pred = self.cnn_proc(text_img, lower_char_rects, w, self.clues[self.curr_plate-1][1], True)
 
         rlmsg = TEAMID + ',' + PASSWORD + ',' + str(self.curr_plate) + ',' + value_pred
         message = clue_pred + ', ' + value_pred
@@ -277,10 +286,11 @@ class PlateDetector:
 
         return img_to_show 
     
-    def cnn_proc(self, text_img, char_rects, avg_w):
+    def cnn_proc(self, text_img, char_rects, avg_w, actual_word, upload=False):
         input_imgs = []
         last_x = char_rects[0][0]
         space_indices = []
+        actual_word = actual_word.replace(" ", "")
 
         for char_idx in range(len(char_rects)):
             x,y,w,h = char_rects[char_idx]
@@ -291,6 +301,11 @@ class PlateDetector:
             cnn_input = self.pad32(char_img).astype(np.float32) / 255.0
             cnn_input = np.expand_dims(cnn_input, axis=-1)
             input_imgs.append(cnn_input)
+            
+            if upload and char_idx < len(actual_word):
+                char_name = actual_word + str(char_idx) + actual_word[char_idx] + ".png"
+                full_path = os.path.join(OUTPUT_PATH, char_name)
+                cv2.imwrite(full_path, self.pad32(char_img), [cv2.IMWRITE_PNG_BILEVEL, 1])
 
         return self.predict_word(input_imgs, space_indices)
 
@@ -321,6 +336,25 @@ class PlateDetector:
         pred_string = ''.join(chars)
 
         return pred_string
+
+    def get_clues(self):
+        clues = []
+
+        with open(CSV_PATH, 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            for row in reader:
+                if row:
+                    clues.append(tuple(row))
+        return clues
+
+    def closest_clue(self, read_clue):
+        def hamming_dist(s1, s2):
+            if len(s1) != len(s2):
+                return max(len(s1), len(s2))
+            return sum(char1 != char2 for char1, char2 in zip(s1,s2))
+        def dist_read_clue(s):
+            return hamming_dist(s, read_clue)
+        return min(CLUE_TOPICS.keys(), key=dist_read_clue)
 
 def main():
     rospy.init_node('plate_detector', anonymous=True)
