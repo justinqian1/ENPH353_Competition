@@ -23,10 +23,17 @@ class States(Enum):
 start_timer = String('team,pass,0,whatever')
 stop_timer = String('team,pass,-1,whatever')
 
-SEC1_DATA_LEN=10 # arr of length 10 for sec 1
+S1_DATA_LEN=10 # arr of length 10 for sec 1
+S2_DATA_LEN=3 # arr of len 3 for sec 2
 
-LINE_FWD_BOX_TH=5 # num px in driving box
-LINE_EDGE_TOL=30 # diff bw lineL and lineR to go back to moving fwd
+SPEED_FWD=[2.0,1.6]
+SPEED_XWALK_LOCK=6.0
+SPEED_FWD_LEFT_LOCK=4.0
+SPEED_TURN=[5.5,3.5]
+SPEED_ALIGN=1.5
+
+S1_LINE_FWD_BOX_TH=5 # num px in driving box
+S1_LINE_EDGE_TOL=30 # diff bw lineL and lineR to go back to moving fwd
 LINE_ALIGN_TOL=10 # diff bw lineL and lineR to require aligning
 LINE_MID_DIFF_TH=10 # threshold for line middle vs side (to decide to go fwd+left/fwd+right)
 LINE_M_TH=190 # y threshold for line middle to matter
@@ -43,25 +50,22 @@ ENTER_LOOP_LOCK_TIME=0.35 # lock left turn at start of loop
 EXIT_LOOP_LOCK_TIME=0.6 # lock time for fwd left while exiting
 EXIT_LOOP_WAIT_TIME=4.0 # wait time before logic to exit loop hits
 
+S2_LINE_FWD_BOX_TH=400 # num px in driving box
+S2_LINE_EDGE_TOL=10 # diff bw lineL and lineR to go back to moving fwd 
+
 class Driver:
     def __init__(self):
         self.data = rospy.Subscriber('/drive_info',Int32MultiArray, callback=self.callback,queue_size=1)
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
         self.loc_pub = rospy.Publisher('/B1/loc', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
-        self.section='1' # sections 1,2,3,4
+        self.section='2' # sections 1,2,3,4
         self.latest_data=None
         self.state = States.FWD 
 
         self.past_ped=False
         self.exit_loop_time=rospy.Time.now()+rospy.Duration(10000)
         self.past_loop=False
-
-        self.forward_speed = 2.0
-        self.fwd_lock_speed = 6.0 # it's locked anyway
-        self.fwd_left_lock_lin_speed = 4.0
-        self.turn_speed = 5.5
-        self.align_speed = 1.5
 
         self.timer = rospy.Timer(rospy.Duration(0.05), self.drive)
 
@@ -76,10 +80,12 @@ class Driver:
         data=self.latest_data
         if data is None:
             return
-        if self.section=='1' and len(data)==SEC1_DATA_LEN:
+        if self.section=='1' and len(data)==S1_DATA_LEN:
             self.driving_section1(data)
-        elif self.section=='2':
+        elif self.section=='2' and len(data)==S2_DATA_LEN:
             self.driving_section2(data)
+        else:
+            print(f"WARNING: Section: {self.section} but data length: {len(data)}")
 
         '''
         elapsed = rospy.Time.now() - self.start_time
@@ -118,7 +124,7 @@ class Driver:
                 self.state=States.FWD_LEFT_LOCK2
                 self.past_loop=True
                 self.locked_until = now + rospy.Duration(EXIT_LOOP_LOCK_TIME)
-            elif line_fwd>LINE_FWD_BOX_TH: # TURN B/C WE'RE DRIVING AT THE LINE
+            elif line_fwd>S1_LINE_FWD_BOX_TH: # TURN B/C WE'RE DRIVING AT THE LINE
                 self.state=States.STOP_TEMP
             else: # logic to change states
                 if self.state == States.FWD: # FWD -> FWD+TURN if either line middle is close, or line is misaligned L/R
@@ -128,12 +134,12 @@ class Driver:
                     elif (line_M > LINE_M_TH and line_M < line_R-LINE_MID_DIFF_TH) or \
                         (line_R > line_L + LINE_LR_DIFF_TH and line_L > -1):
                         self.state=States.FWD_LEFT
-                if (self.state == States.FWD_LEFT and line_L > line_R-LINE_EDGE_TOL) or \
-                (self.state == States.FWD_RIGHT and line_R > line_L-LINE_EDGE_TOL):
+                if (self.state == States.FWD_LEFT and line_L > line_R-S1_LINE_EDGE_TOL) or \
+                (self.state == States.FWD_RIGHT and line_R > line_L-S1_LINE_EDGE_TOL):
                     self.state=States.FWD
                 
-        elif (self.state == States.LEFT and line_L > line_R-LINE_EDGE_TOL) or \
-             (self.state == States.RIGHT and line_R > line_L-LINE_EDGE_TOL):
+        elif (self.state == States.LEFT and line_L > line_R-S1_LINE_EDGE_TOL) or \
+             (self.state == States.RIGHT and line_R > line_L-S1_LINE_EDGE_TOL):
             self.state = States.STOP_TEMP
         
         #align to red/pink line
@@ -156,7 +162,7 @@ class Driver:
                     self.state=States.ALIGN_LEFT
                 else:
                     self.switch_section('2')
-            elif line_fwd>LINE_FWD_BOX_TH: # fwd -> turn
+            elif line_fwd>S1_LINE_FWD_BOX_TH: # fwd -> turn
                 self.state=States.RIGHT if line_L > line_R else States.LEFT
             else: # turn -> fwd
                 self.state=States.FWD
@@ -171,43 +177,43 @@ class Driver:
 
         twist = Twist()
         if self.state == States.FWD:
-            twist.linear.x = self.forward_speed
+            twist.linear.x = SPEED_FWD[0]
             twist.angular.z = 0
         elif self.state == States.FWD_LOCK:
-            twist.linear.x = self.fwd_lock_speed
+            twist.linear.x = SPEED_XWALK_LOCK
             twist.angular.z = 0
         elif self.state==States.FWD_LEFT:
             if line_L==-1: # most aggressive - line middle is close
-                ang_speed=self.turn_speed*0.8
+                ang_speed=SPEED_TURN[0]*0.8
             else: # less aggressive - left and right just not aligned
-                ang_speed=self.turn_speed*0.25
-            twist.linear.x = self.forward_speed
+                ang_speed=SPEED_TURN[0]*0.25
+            twist.linear.x = SPEED_FWD
             twist.angular.z = ang_speed
-        elif self.state==States.FWD_LEFT_LOCK1:
-            twist.linear.x = self.fwd_left_lock_lin_speed
-            twist.angular.z = self.turn_speed*0.9
-        elif self.state==States.FWD_LEFT_LOCK2:
-            twist.linear.x = self.fwd_left_lock_lin_speed
-            twist.angular.z = self.turn_speed*0.6
+        elif self.state==States.FWD_LEFT_LOCK1: # entering loop
+            twist.linear.x = SPEED_FWD_LEFT_LOCK
+            twist.angular.z = SPEED_TURN[0]*0.9
+        elif self.state==States.FWD_LEFT_LOCK2: # exiting loop
+            twist.linear.x = SPEED_FWD_LEFT_LOCK
+            twist.angular.z = SPEED_TURN[0]*0.6
         elif self.state==States.FWD_RIGHT:
             if line_L==-1: # most aggressive - line middle is close
-                ang_speed=-self.turn_speed*0.8
+                ang_speed=-SPEED_TURN[0]*0.8
             else: # less aggressive - left and right just not aligned
-                ang_speed=-self.turn_speed*0.25
-            twist.linear.x = self.forward_speed
+                ang_speed=-SPEED_TURN[0]*0.25
+            twist.linear.x = SPEED_FWD[0]
             twist.angular.z = ang_speed
         elif self.state == States.LEFT:
             twist.linear.x = 0
-            twist.angular.z = self.turn_speed
+            twist.angular.z = SPEED_TURN[0]
         elif self.state == States.RIGHT:
             twist.linear.x = 0
-            twist.angular.z = -self.turn_speed
+            twist.angular.z = -SPEED_TURN[0]
         elif self.state == States.ALIGN_LEFT:
             twist.linear.x = 0
-            twist.angular.z = self.align_speed
+            twist.angular.z = SPEED_ALIGN
         elif self.state == States.ALIGN_RIGHT:
             twist.linear.x = 0
-            twist.angular.z = -self.align_speed
+            twist.angular.z = -SPEED_ALIGN
         else: # stopped
             twist.linear.x = 0
             twist.angular.z = 0
@@ -215,7 +221,33 @@ class Driver:
         self.drive_pub.publish(twist)
     
     def driving_section2(self,data):
-        print(data)
+        line_fwd,line_L,line_R=data
+        if self.state == States.FWD and line_fwd>S2_LINE_FWD_BOX_TH:
+            self.state=States.RIGHT if line_L > line_R else States.LEFT
+        elif (self.state == States.LEFT and line_L > line_R-S2_LINE_EDGE_TOL and line_L > -1) or \
+             (self.state == States.RIGHT and line_R > line_L-S2_LINE_EDGE_TOL and line_R > -1):
+            self.state = States.STOP_TEMP
+        elif self.state==States.STOP_TEMP:
+            if line_fwd>S2_LINE_FWD_BOX_TH: # fwd -> turn
+                self.state=States.RIGHT if line_L > line_R else States.LEFT
+            else: # turn -> fwd
+                self.state=States.FWD
+
+        twist = Twist()
+        if self.state == States.FWD:
+            twist.linear.x = SPEED_FWD[1]
+            twist.angular.z = 0
+        elif self.state == States.LEFT:
+            twist.linear.x = 0
+            twist.angular.z = SPEED_TURN[1]
+        elif self.state == States.RIGHT:
+            twist.linear.x = 0
+            twist.angular.z = -SPEED_TURN[1]
+        else: # stopped
+            twist.linear.x = 0
+            twist.angular.z = 0
+        print(f"{self.state} | Line: {(line_fwd,line_L,line_R)} | Misc: {()}")
+        self.drive_pub.publish(twist)
     
     def switch_section(self,new_section):
         self.section=new_section

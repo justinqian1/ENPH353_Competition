@@ -21,7 +21,7 @@ class LineDetector:
         self.image_sub = rospy.Subscriber(image_topic, Image, self.callback, queue_size=1)
         self.loc_sub = rospy.Subscriber('/B1/loc', String,self.state_callback,queue_size=1)
         self.bridge = CvBridge()
-        self.section='1'
+        self.section='2'
 
     def callback(self,data):
         try:
@@ -81,11 +81,11 @@ class LineDetector:
         # decide if line is directly in front of robot (need to turn)
         line_in_front=np.sum(line_mask[210:240,140:180])+np.sum(line_mask[240:,70:250]) 
         line_left=np.where(line_mask[:,0])[0]
-        line_left_coord=line_left[-2] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
+        line_left_coord=line_left[-3] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
         line_mid=np.where(line_mask[:,160])[0]
-        line_mid_coord=line_mid[-1] if len(line_mid)>=2 else -1 # thresholding based on length 2 but choosing last px for middle
+        line_mid_coord=line_mid[-1] if len(line_mid)>=1 else -1 # thresholding based on length 2 but choosing last px for middle
         line_right=np.where(line_mask[:,-1])[0]
-        line_right_coord=line_right[-2] if len(line_right)>=3 else -1
+        line_right_coord=line_right[-3] if len(line_right)>=3 else -1
         road_left=np.where(road_mask[:,0])[0]
         road_left_coord=road_left[2] if len(road_left)>=3 else -1 # use -3 to avoid outliers/noise
         road_sz=np.sum(road_mask[:])
@@ -100,27 +100,36 @@ class LineDetector:
         channel_b=image[:,:,0]
         channel_g=image[:,:,1]
         channel_r=image[:,:,2]
-        b_minus_g=channel_b-channel_g
-        b_minus_r=channel_b-channel_r
-        g_minus_r=channel_g-channel_r
+        line_mask=(channel_b>130) & (channel_b<170) & (channel_g>175) & (channel_r < 203)
+        line_mask = line_mask.astype(np.uint8) * 255
+        blurred_line = cv2.GaussianBlur(line_mask, (17,17), 0)
+        _, blurred_line = cv2.threshold(blurred_line, 60, 255, cv2.THRESH_BINARY)
+        kernel = np.ones((3,3), np.uint8)
+        blurred_line = cv2.morphologyEx(blurred_line, cv2.MORPH_OPEN, kernel)
+        line_mask=blurred_line>0  
+        line_mask[260:,:]=False      
 
-        line_mask=(channel_r>185) & (channel_r<220) & (channel_g>185) & (channel_g<220) & (channel_b>130) & (channel_b<170)
         features_mask=np.zeros(image.shape,dtype=np.uint8)
-        features_mask[210:,140:145,2]=80 # driving box 1
-        features_mask[210:,175:180,2]=80
-        features_mask[210:215,140:180,2]=80
-        features_mask[240:,70:75,2]=120 # driving box 2
-        features_mask[240:,245:250,2]=120
-        features_mask[240:245,70:250,2]=120
-
+        
+        # DRIVING BOX
+        features_mask[195:200,75:-75,2]=100 # main driving box (200:230, 80:-80)
+        features_mask[230:235,75:-75,2]=100 
+        features_mask[200:230,75:80,2]=100 
+        features_mask[200:230,-80:-75,2]=100 
+        
         features_mask[line_mask]=255
 
-        line_sz=np.sum(line_mask[:])
-        
-        cv2.imshow('camera feed', image)
+        line_sz=np.sum(line_mask[200:230,80:-80])
+        line_left=np.where(line_mask[:,0])[0]
+        line_left_coord=line_left[2] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
+        line_right=np.where(line_mask[:,-1])[0]
+        line_right_coord=line_right[2] if len(line_right)>=3 else -1
+
+        #cv2.imwrite('/tmp/frame.png',image)
+        #cv2.imshow('camera feed', image)
         cv2.imshow('line',features_mask)
         cv2.waitKey(1)
-        return [line_sz]
+        return [line_sz,line_left_coord,line_right_coord]
 
 def main():
     rospy.init_node('line_detector', anonymous=True)
