@@ -34,6 +34,8 @@ class LineDetector:
             msg.data = self.features_part1(cv_image)
         elif self.section=='2':
             msg.data = self.features_part2(cv_image)
+        elif self.section=='3':
+            msg.data = self.features_part3(cv_image)
         self.result_pub.publish(msg)
 
     def state_callback(self,data):
@@ -152,6 +154,34 @@ class LineDetector:
         cv2.imshow('line',features_mask)
         cv2.waitKey(1)
         return [line_sz,line_left_coord,line_right_coord,line_left_amt,line_right_amt,water_sz,land_left,land_right,pink_ln_sz,pink_ln_mid]
+    
+    def features_part3(self,image):
+        channel_b=image[:,:,0]
+        channel_g=image[:,:,1]
+        channel_r=image[:,:,2]
+        gs=cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        yoda=(gs>36) & (gs<52) & (channel_r>channel_b) & (channel_b>=channel_g) & (channel_b<channel_g+3)
+        car=(gs>35)&(gs<45)&(channel_r==channel_b)&(channel_r==channel_g)
+        pink_line_mask=(channel_r>250) & (channel_b>250) & (channel_g<10)
+
+        features_mask=np.zeros(image.shape,dtype=np.uint8)
+        features_mask[:,:,1][yoda]=255
+        features_mask[car]=60
+        features_mask[:,:,0][pink_line_mask]=255
+        features_mask[:,:,2][pink_line_mask]=255
+
+        yoda_sz=np.sum(yoda[:])
+        car_sz=np.sum(car[:])
+        yoda_row=np.any(yoda,axis=0)
+        yoda_idx=np.flatnonzero(yoda_row)
+        yoda_mid=(yoda_idx[-3]+yoda_idx[2])//2 if len(yoda_idx)>5 else -1
+
+        #cv2.imwrite('/tmp/frame.png',image)
+        cv2.imshow('camera feed', image)
+        cv2.imshow('features',features_mask)
+        cv2.waitKey(1)
+        return [yoda_sz,yoda_mid,car_sz]
 
 def main():
     rospy.init_node('line_detector', anonymous=True)

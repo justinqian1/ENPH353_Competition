@@ -18,18 +18,20 @@ class States(Enum):
     STOP_TEMP=auto() # only for transitioning bw fwd/turn
     STOP_PED_SEEN=auto()
     STOP_TRUCK=auto()
+    STOP_YODA=auto()
     STOP_END=auto()
 
 start_timer = String('team,pass,0,whatever')
 stop_timer = String('team,pass,-1,whatever')
 
-IMG_SZ=320
+IMG_MID=160
 S1_DATA_LEN=10 # arr of length 10 for sec 1
-S2_DATA_LEN=10 # arr of len 8 for sec 2
+S2_DATA_LEN=10 
+S3_DATA_LEN=3
 
-SPEED_FWD=[1.8,1.6]
-SPEED_TURN=[5.0,4.0]
-SPEED_XWALK_LOCK=6.0
+SPEED_FWD=[1.8,1.6,1.8]
+SPEED_TURN=[5.0,4.0,5.0]
+SPEED_XWALK_LOCK=7.0
 SPEED_FWD_LEFT_LOCK=4.0
 SPEED_ALIGN=1.5
 
@@ -46,8 +48,8 @@ ROAD_SZ_TH=42_000 # num px of road to start seq to enter loop
 TRUCK_STOP_TH=1100 # num px in truck to stop for it
 TRUCK_RESUME_TH=600 # num px in truck to resume; diff to avoid stop/restart loop
 ROAD_L_TH=185 # road y coord to exit line
-XWALK_LOCK_TIME=0.35 # time to lock fwd state in crosswalk
-ENTER_LOOP_LOCK_TIME=0.35 # lock left turn at start of loop
+XWALK_LOCK_TIME=0.3 # time to lock fwd state in crosswalk
+ENTER_LOOP_LOCK_TIME=0.3 # lock left turn at start of loop
 EXIT_LOOP_LOCK_TIME=0.6 # lock time for fwd left while exiting
 EXIT_LOOP_WAIT_TIME=4.0 # wait time before logic to exit loop hits
 
@@ -62,6 +64,13 @@ S2_PINK_LN_TH1=50 # threshold to just drive twd pink line
 S2_PINK_LN_TH2=150 # threshold to drive at the pink line, regardless of pink ln median
 S2_PINK_LN_TH3=2000 # threshold to align self to line
 PINK_LN_TOL=20 # tolerance (px in y) to drive straight at the line
+
+YODA_START_TH=1200 # num px to start following yoda
+YODA_STOP_TH=2000 # num px to pause and wait for yoda to get ahead
+YODA_START_TURN_TH=50 # num px on side to start rotating to follow yoda instead of going straight 
+YODA_END_TURN_TH=30 # num px on side to go back to going straight
+PAST_YODA_YODA_TH=200 # num yoda px to say we're at the car
+PAST_YODA_CAR_TH=200 # num car px to say we're at the car
 
 
 class Driver:
@@ -79,6 +88,8 @@ class Driver:
         self.past_loop=False
         self.on_bridge=False
         self.past_bridge=False
+        self.following_yoda=False
+        self.aligning_tunnel=False
 
         self.timer = rospy.Timer(rospy.Duration(0.05), self.drive)
 
@@ -97,6 +108,8 @@ class Driver:
             self.driving_section1(data)
         elif self.section=='2' and len(data)==S2_DATA_LEN:
             self.driving_section2(data)
+        elif self.section=='3' and len(data)==S3_DATA_LEN:
+            self.driving_section3(data)
         else:
             print(f"WARNING: Section: {self.section} but data length: {len(data)}")
 
@@ -206,7 +219,7 @@ class Driver:
             twist.angular.z = ang_speed
         elif self.state==States.FWD_LEFT_LOCK1: # entering loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
-            twist.angular.z = SPEED_TURN[0]*1.3
+            twist.angular.z = SPEED_TURN[0]*1.25
         elif self.state==States.FWD_LEFT_LOCK2: # exiting loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
             twist.angular.z = SPEED_TURN[0]*0.9
@@ -274,10 +287,10 @@ class Driver:
         if self.past_bridge and pink_ln_sz>S2_PINK_LN_TH1:
             if pink_ln_sz>S2_PINK_LN_TH3:
                 self.switch_section('3')
-            elif abs(IMG_SZ//2-pink_ln_mid)<PINK_LN_TOL:
+            elif abs(IMG_MID-pink_ln_mid)<PINK_LN_TOL:
                 self.state=States.FWD
             elif pink_ln_sz>S2_PINK_LN_TH2:
-                self.state=States.FWD_LEFT if pink_ln_mid<IMG_SZ//2 else States.FWD_RIGHT
+                self.state=States.FWD_LEFT if pink_ln_mid<IMG_MID else States.FWD_RIGHT
 
         twist = Twist()
         if self.state == States.FWD:
@@ -333,16 +346,56 @@ class Driver:
         print(f"{self.state} | Water: {(amt_water,land_L,land_R)}")
         self.drive_pub.publish(twist)
     
+    def driving_section3(self,data):
+        yoda_sz,yoda_mid,car_sz=data
+        
+        if not self.following_yoda and not self.aligning_tunnel and yoda_sz>YODA_START_TH:
+            self.following_yoda=True
+            self.state=States.FWD
+        elif self.following_yoda:
+            if yoda_sz<PAST_YODA_YODA_TH and car_sz>PAST_YODA_CAR_TH:
+                self.following_yoda=False
+                self.aligning_tunnel=True
+            elif yoda_sz>YODA_STOP_TH:
+                self.state=States.STOP_YODA
+            elif self.state==States.STOP_YODA and yoda_sz<YODA_START_TH:
+                    self.state=States.FWD
+            elif self.state in [States.FWD,States.STOP_YODA] and IMG_MID-yoda_mid>YODA_START_TURN_TH:
+                self.state=States.LEFT
+            elif self.state in [States.FWD,States.STOP_YODA] and yoda_mid-IMG_MID>YODA_START_TURN_TH:
+                self.state=States.RIGHT
+            elif self.state in [States.LEFT,States.RIGHT] and abs(IMG_MID-yoda_mid)<YODA_END_TURN_TH:
+                self.state=States.FWD if yoda_sz<YODA_START_TH else States.STOP_YODA
+        elif self.aligning_tunnel:
+            print('aligning to tunnel')
+            self.state=States.STOP_END
+
+        twist = Twist()
+        if self.state == States.FWD:
+            twist.linear.x = SPEED_FWD[2]
+            twist.angular.z = 0
+        elif self.state == States.LEFT:
+            twist.linear.x = 0
+            twist.angular.z = SPEED_TURN[2]
+        elif self.state == States.RIGHT:
+            twist.linear.x = 0
+            twist.angular.z = -SPEED_TURN[2]
+        else: # stopped
+            twist.linear.x = 0
+            twist.angular.z = 0
+        print(f"{self.state} | Yoda: {(yoda_sz,yoda_mid)} | Car: {(car_sz)}")
+        self.drive_pub.publish(twist)
+        
     def switch_section(self,new_section):
         self.state=States.STOP_TEMP
         self.drive_pub.publish(Twist())
         self.section=new_section
         self.loc_pub.publish(new_section)
-        #'''
+        '''
         if new_section=='3':
             self.state=States.STOP_END
             self.time_pub.publish(stop_timer)
-        #'''
+        '''
 
 def main():
     rospy.init_node('driver')
