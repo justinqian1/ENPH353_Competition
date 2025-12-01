@@ -27,13 +27,14 @@ stop_timer = String('team,pass,-1,whatever')
 IMG_MID=160
 S1_DATA_LEN=10 # arr of length 10 for sec 1
 S2_DATA_LEN=10 
-S3_DATA_LEN=3
+S3_DATA_LEN=5
+S4_DATA_LEN=1
 
-SPEED_FWD=[1.8,1.6,1.8]
+SPEED_FWD=[1.8,1.6,2.0]
 SPEED_TURN=[5.0,4.0,5.0]
 SPEED_XWALK_LOCK=7.0
 SPEED_FWD_LEFT_LOCK=4.0
-SPEED_ALIGN=1.5
+SPEED_ALIGN=[1.0,1.5,2.5] # 3 align speeds for convenience
 
 S1_LINE_FWD_BOX_TH=5 # num px in driving box
 S1_LINE_EDGE_TOL=30 # diff bw lineL and lineR to go back to moving fwd
@@ -58,19 +59,25 @@ S2_LINE_FWD_FWD_TH=500 # num px in driving box to go temp stop -> fwd
 S2_LINE_EDGE_TOL=18 # diff bw lineL and lineR to go back to moving fwd 
 S2_LINE_LR_DIFF_TH=30 # diff bw left and right lines to trigger pid driving
 ENTER_BRIDGE_TH=4000 # num water px to enter bridge section
-EXIT_BRIDGE_TH=300 # num water px to leave bridge section
-WATER_TURN_TH=85 # num pix on either side to start turning
+EXIT_BRIDGE_TH=100 # num water px to leave bridge section
+WATER_TURN_TH=75 # num pix on either side to start turning
+WATER_STOP_TURN_TH=30 # num px to stop turning
 S2_PINK_LN_TH1=50 # threshold to just drive twd pink line
 S2_PINK_LN_TH2=150 # threshold to drive at the pink line, regardless of pink ln median
 S2_PINK_LN_TH3=2000 # threshold to align self to line
-PINK_LN_TOL=20 # tolerance (px in y) to drive straight at the line
+S2_PINK_LN_TOL=20 # tolerance (px in y) to drive straight at the line
 
-YODA_START_TH=1200 # num px to start following yoda
-YODA_STOP_TH=2000 # num px to pause and wait for yoda to get ahead
-YODA_START_TURN_TH=50 # num px on side to start rotating to follow yoda instead of going straight 
-YODA_END_TURN_TH=30 # num px on side to go back to going straight
+YODA_START_TH=1100 # num px to start following yoda
+YODA_STOP_TH=3500 # num px to pause and wait for yoda to get ahead
+YODA_CAR_STOP_TH=5000 # num 'car' px to pause (since parts of yoda look like car)
+YODA_START_TURN_TH=50 # num px on side to start rotating to follow yoda instead of going straight
+CAR_START_TURN_TH=50 # same for car
+YODA_END_TURN_TH=25 # num px on side to go back to going straight
+CAR_END_TURN_TH=25 # same for car
 PAST_YODA_YODA_TH=200 # num yoda px to say we're at the car
 PAST_YODA_CAR_TH=200 # num car px to say we're at the car
+CAR_TH=5000 # num car px to say we're at the pink ln
+S3_PINK_LN_TOL=5 # dist from pink ln to median to say we're aligned
 
 
 class Driver:
@@ -110,6 +117,8 @@ class Driver:
             self.driving_section2(data)
         elif self.section=='3' and len(data)==S3_DATA_LEN:
             self.driving_section3(data)
+        elif self.section=='4' and len(data)==S4_DATA_LEN:
+            self.driving_section4(data)
         else:
             print(f"WARNING: Section: {self.section} but data length: {len(data)}")
 
@@ -141,7 +150,7 @@ class Driver:
                 self.state=States.STOP_TEMP
             elif truck>TRUCK_STOP_TH and self.past_ped and not self.past_loop: # STOP FOR TRUCK
                 self.state=States.STOP_TRUCK
-            elif line_L==-1 and line_M==-1 and line_R==-1 and road_sz>ROAD_SZ_TH: # ENTERING LOOP
+            elif self.past_ped and not self.past_loop and line_L==-1 and line_R==-1 and road_sz>ROAD_SZ_TH: # ENTERING LOOP; consider line_M==-1
                 self.state=States.FWD_LEFT_LOCK1
                 self.locked_until = now + rospy.Duration(ENTER_LOOP_LOCK_TIME)
                 self.exit_loop_time = now+rospy.Duration(EXIT_LOOP_WAIT_TIME)
@@ -219,7 +228,7 @@ class Driver:
             twist.angular.z = ang_speed
         elif self.state==States.FWD_LEFT_LOCK1: # entering loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
-            twist.angular.z = SPEED_TURN[0]*1.25
+            twist.angular.z = SPEED_TURN[0]*1.2
         elif self.state==States.FWD_LEFT_LOCK2: # exiting loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
             twist.angular.z = SPEED_TURN[0]*0.9
@@ -238,10 +247,10 @@ class Driver:
             twist.angular.z = -SPEED_TURN[0]
         elif self.state == States.ALIGN_LEFT:
             twist.linear.x = 0
-            twist.angular.z = SPEED_ALIGN
+            twist.angular.z = SPEED_ALIGN[1]
         elif self.state == States.ALIGN_RIGHT:
             twist.linear.x = 0
-            twist.angular.z = -SPEED_ALIGN
+            twist.angular.z = -SPEED_ALIGN[1]
         else: # stopped
             twist.linear.x = 0
             twist.angular.z = 0
@@ -287,7 +296,7 @@ class Driver:
         if self.past_bridge and pink_ln_sz>S2_PINK_LN_TH1:
             if pink_ln_sz>S2_PINK_LN_TH3:
                 self.switch_section('3')
-            elif abs(IMG_MID-pink_ln_mid)<PINK_LN_TOL:
+            elif abs(IMG_MID-pink_ln_mid)<S2_PINK_LN_TOL:
                 self.state=States.FWD
             elif pink_ln_sz>S2_PINK_LN_TH2:
                 self.state=States.FWD_LEFT if pink_ln_mid<IMG_MID else States.FWD_RIGHT
@@ -326,20 +335,20 @@ class Driver:
                     self.state=States.RIGHT
                 elif land_R > WATER_TURN_TH:
                     self.state=States.LEFT
-            elif (self.state == States.LEFT and land_L > land_R-S2_LINE_EDGE_TOL) or \
-                (self.state == States.RIGHT and land_R > land_L-S2_LINE_EDGE_TOL):
+            elif (self.state == States.LEFT and land_L > land_R-WATER_STOP_TURN_TH) or \
+                (self.state == States.RIGHT and land_R > land_L-WATER_STOP_TURN_TH):
                 self.state=States.FWD
 
         twist = Twist()
         if self.state == States.FWD:
-            twist.linear.x = SPEED_FWD[1]*0.75
+            twist.linear.x = SPEED_FWD[1]*0.9
             twist.angular.z = 0
         elif self.state == States.LEFT:
             twist.linear.x = 0
-            twist.angular.z = SPEED_TURN[1]*0.75
+            twist.angular.z = SPEED_TURN[1]*0.9
         elif self.state == States.RIGHT:
             twist.linear.x = 0
-            twist.angular.z = -SPEED_TURN[1]*0.75
+            twist.angular.z = -SPEED_TURN[1]*0.9
         else: # stopped
             twist.linear.x = 0
             twist.angular.z = 0
@@ -347,7 +356,7 @@ class Driver:
         self.drive_pub.publish(twist)
     
     def driving_section3(self,data):
-        yoda_sz,yoda_mid,car_sz=data
+        yoda_sz,yoda_mid,car_sz,car_mid,pink_ln_mid=data
         
         if not self.following_yoda and not self.aligning_tunnel and yoda_sz>YODA_START_TH:
             self.following_yoda=True
@@ -356,7 +365,8 @@ class Driver:
             if yoda_sz<PAST_YODA_YODA_TH and car_sz>PAST_YODA_CAR_TH:
                 self.following_yoda=False
                 self.aligning_tunnel=True
-            elif yoda_sz>YODA_STOP_TH:
+                print("Aligning to tunnel")
+            elif self.state != States.STOP_YODA and (yoda_sz>YODA_STOP_TH or car_sz>YODA_CAR_STOP_TH):
                 self.state=States.STOP_YODA
             elif self.state==States.STOP_YODA and yoda_sz<YODA_START_TH:
                     self.state=States.FWD
@@ -364,11 +374,46 @@ class Driver:
                 self.state=States.LEFT
             elif self.state in [States.FWD,States.STOP_YODA] and yoda_mid-IMG_MID>YODA_START_TURN_TH:
                 self.state=States.RIGHT
-            elif self.state in [States.LEFT,States.RIGHT] and abs(IMG_MID-yoda_mid)<YODA_END_TURN_TH:
-                self.state=States.FWD if yoda_sz<YODA_START_TH else States.STOP_YODA
+            elif (self.state == States.LEFT and IMG_MID-yoda_mid<YODA_END_TURN_TH) or \
+                 (self.state == States.RIGHT and yoda_mid-IMG_MID<YODA_END_TURN_TH):
+                self.state=States.FWD if yoda_sz<YODA_STOP_TH else States.STOP_YODA
         elif self.aligning_tunnel:
-            print('aligning to tunnel')
-            self.state=States.STOP_END
+            if self.state == States.ALIGN_LEFT and abs(IMG_MID-pink_ln_mid)<S3_PINK_LN_TOL:
+                self.switch_section('4')
+            elif car_sz>CAR_TH:
+                self.state=States.ALIGN_LEFT
+            elif self.state==States.FWD and IMG_MID-car_mid>CAR_START_TURN_TH:
+                self.state=States.LEFT
+            elif self.state==States.FWD and car_mid-IMG_MID>CAR_START_TURN_TH:
+                self.state=States.RIGHT
+            elif (self.state == States.LEFT and IMG_MID-car_mid<CAR_END_TURN_TH) or \
+                 (self.state == States.RIGHT and car_mid-IMG_MID<CAR_END_TURN_TH):
+                self.state=States.FWD if car_sz<CAR_TH else States.ALIGN_LEFT
+
+        twist = Twist()
+        if self.state == States.FWD:
+            twist.linear.x = SPEED_FWD[2]
+            twist.angular.z = 0
+        elif self.state == States.LEFT:
+            twist.linear.x = 0
+            twist.angular.z = SPEED_TURN[2]
+        elif self.state == States.RIGHT:
+            twist.linear.x = 0
+            twist.angular.z = -SPEED_TURN[2]
+        elif self.state == States.ALIGN_LEFT:
+            twist.linear.x = 0
+            twist.angular.z = SPEED_ALIGN[2] if pink_ln_mid==-1 else SPEED_ALIGN[0]
+        elif self.state == States.ALIGN_RIGHT:
+            twist.linear.x = 0
+            twist.angular.z = -SPEED_ALIGN[2] if pink_ln_mid==-1 else SPEED_ALIGN[0]
+        else: # stopped
+            twist.linear.x = 0
+            twist.angular.z = 0
+        print(f"{self.state} | Yoda: {(yoda_sz,yoda_mid)} | Car: {(car_sz,car_mid)} | Pink line: {pink_ln_mid}")
+        self.drive_pub.publish(twist)
+
+    def driving_section4(self,data):
+        self.state=States.FWD
 
         twist = Twist()
         if self.state == States.FWD:
@@ -383,7 +428,7 @@ class Driver:
         else: # stopped
             twist.linear.x = 0
             twist.angular.z = 0
-        print(f"{self.state} | Yoda: {(yoda_sz,yoda_mid)} | Car: {(car_sz)}")
+        print(f"{self.state} | Data: {data}")
         self.drive_pub.publish(twist)
         
     def switch_section(self,new_section):

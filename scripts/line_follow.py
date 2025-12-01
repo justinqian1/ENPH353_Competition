@@ -36,6 +36,8 @@ class LineDetector:
             msg.data = self.features_part2(cv_image)
         elif self.section=='3':
             msg.data = self.features_part3(cv_image)
+        elif self.section=='4':
+            msg.data = self.features_part4(cv_image)
         self.result_pub.publish(msg)
 
     def state_callback(self,data):
@@ -172,16 +174,30 @@ class LineDetector:
         features_mask[:,:,2][pink_line_mask]=255
 
         yoda_sz=np.sum(yoda[:])
-        car_sz=np.sum(car[:])
         yoda_row=np.any(yoda,axis=0)
         yoda_idx=np.flatnonzero(yoda_row)
         yoda_mid=(yoda_idx[-3]+yoda_idx[2])//2 if len(yoda_idx)>5 else -1
+        car_sz=np.sum(car[:])
+        car_row=np.any(car,axis=0)
+        car_idx=np.flatnonzero(car_row)
+        car_mid=(car_idx[-3]+car_idx[2])//2 if len(car_idx)>5 else -1
+        pink_line_row=np.any(pink_line_mask,axis=0)
+        pink_line_idx=np.flatnonzero(pink_line_row)
+        pink_line_mid=(pink_line_idx[-3]+pink_line_idx[2])//2 if len(pink_line_idx)>5 else -1
 
         #cv2.imwrite('/tmp/frame.png',image)
         cv2.imshow('camera feed', image)
         cv2.imshow('features',features_mask)
         cv2.waitKey(1)
-        return [yoda_sz,yoda_mid,car_sz]
+        return [yoda_sz,yoda_mid,car_sz,car_mid,pink_line_mid]
+    
+    def features_part4(self,image):
+        channel_b=image[:,:,0]
+        channel_g=image[:,:,1]
+        channel_r=image[:,:,2]
+        cv2.imshow('camera feed', image)
+        cv2.waitKey(1)
+        return [1]
 
 def main():
     rospy.init_node('line_detector', anonymous=True)
