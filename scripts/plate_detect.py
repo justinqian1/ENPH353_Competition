@@ -40,7 +40,7 @@ PASSWORD = "password"
 
 CLUE_TOPICS = {'SIZE': 1, 'VICTIM': 2, 'CRIME': 3, 'TIME': 4, 'PLACE': 5, 'MOTIVE': 6, 'WEAPON': 7, 'BANDIT': 8}
 CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
-OUTPUT_PATH = '/home/fizzer/cnn_train/live_gen_chars'
+OUTPUT_PATH = '/home/fizzer/cnn_train/test_chars'
 MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
 POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
               'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 

@@ -11,5 +11,6 @@ catkin_install_python(PROGRAMS
   scripts/plate_detect.py
   scripts/plate_gen.py
   scripts/spawn_pos.py
+  il_dev/kappa_drive.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

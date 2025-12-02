@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>KappaDriver</class>
+ <widget class="QMainWindow" name="KappaDriver">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>KappaDriver</string>
+  </property>
+  <property name="accessibleName">
+   <string>KappaDriver</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QLabel" name="display_live_image">
+    <property name="geometry">
+     <rect>
+      <x>70</x>
+      <y>90</y>
+      <width>651</width>
+      <height>251</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">QLabel{
+	border: 2px
+}</string>
+    </property>
+    <property name="text">
+     <string/>
+    </property>
+   </widget>
+   <widget class="QLabel" name="linear_x_label">
+    <property name="geometry">
+     <rect>
+      <x>70</x>
+      <y>520</y>
+      <width>81</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Linear Speed</string>
+    </property>
+   </widget>
+   <widget class="QSlider" name="kappa_slider">
+    <property name="geometry">
+     <rect>
+      <x>230</x>
+      <y>390</y>
+      <width>521</width>
+      <height>91</height>
+     </rect>
+    </property>
+    <property name="orientation">
+     <enum>Qt::Horizontal</enum>
+    </property>
+   </widget>
+   <widget class="QLabel" name="kappa_instr_label">
+    <property name="geometry">
+     <rect>
+      <x>230</x>
+      <y>410</y>
+      <width>261</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Kappa Controller (left click hold to record data)</string>
+    </property>
+   </widget>
+   <widget class="QDial" name="linear_speed_dial">
+    <property name="geometry">
+     <rect>
+      <x>40</x>
+      <y>380</y>
+      <width>121</width>
+      <height>131</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="scratch_button">
+    <property name="geometry">
+     <rect>
+      <x>580</x>
+      <y>500</y>
+      <width>171</width>
+      <height>41</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>-1</pointsize>
+      <weight>75</weight>
+      <italic>false</italic>
+      <bold>true</bold>
+     </font>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">QPushButton {
+    background-color: red;
+    color: white; /* Optional: Sets text color to white for better contrast */
+    border-style: outset;
+    border-width: 2px;
+    border-radius: 10px;
+    border-color: darkred;
+    font: bold 14px;
+    padding: 6px;
+}
+
+QPushButton:hover {
+    background-color: pink; /* Optional: Change color on hover */
+}
+
+QPushButton:pressed {
+    background-color: darkred; /* Optional: Change color when pressed */
+    border-style: inset;
+}</string>
+    </property>
+    <property name="text">
+     <string>Delete last record</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="respawn_button">
+    <property name="geometry">
+     <rect>
+      <x>230</x>
+      <y>500</y>
+      <width>176</width>
+      <height>41</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">QPushButton {
+    background-color: green;
+    color: white; /* Optional: Set text color to white for better contrast */
+    border-style: outset;
+    border-width: 2px;
+    border-radius: 10px;
+    border-color: darkgreen;
+    font: bold 14px;
+    min-width: 8em;
+    padding: 6px;
+}
+
+QPushButton:hover {
+    background-color: lightgreen; /* Optional: Change color on hover */
+}
+
+QPushButton:pressed {
+    background-color: darkgreen; /* Optional: Change color when pressed */
+    border-style: inset;
+}</string>
+    </property>
+    <property name="text">
+     <string>Respawn</string>
+    </property>
+   </widget>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>800</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuKappaDriver">
+    <property name="title">
+     <string>KappaDriver</string>
+    </property>
+   </widget>
+   <addaction name="menuKappaDriver"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

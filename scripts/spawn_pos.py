@@ -5,6 +5,7 @@ import rospy
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
 from std_msgs.msg import Float32MultiArray
+from scipy.spatial.transform import Rotation as R
 
 class SpawnPosition:
     """
@@ -14,10 +15,14 @@ class SpawnPosition:
     Listens for messages on dedicated topic for teleport positions, then spawns robot in requested position.
     """
 
+    def __init__(self):
+        position_topic = rospy.get_param("~position_topic", "/spawn_position")
+        self.pos_sub = rospy.Subscriber('/spawn_position', Float32MultiArray, self.callback, queue_size=10)
+
     def callback(self, data):
+        position = self.eul_to_qua(data.data)
         msg = ModelState()
         msg.model_name = 'B1'
-        position = data.data
 
         msg.pose.position.x = position[0]
         msg.pose.position.y = position[1]
@@ -35,9 +40,9 @@ class SpawnPosition:
         except rospy.ServiceException:
             print ("Service call failed")
 
-    def __init__(self):
-        position_topic = rospy.get_param("~position_topic", "/spawn_position")
-        self.pos_sub = rospy.Subscriber('/spawn_position', Float32MultiArray, self.callback, queue_size=10)
+    def eul_to_qua(self, eul_rep):
+        quat = R.from_euler('xyz', eul_rep[-3:], degrees=False).as_quat()
+        return list(eul_rep[:3]) + quat.tolist()
 
 def main():
     rospy.init_node('spawn_position', anonymous=True)

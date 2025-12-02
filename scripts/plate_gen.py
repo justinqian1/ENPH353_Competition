@@ -352,8 +352,8 @@ def main():
     for plate in range(len(POS_PLATES)):
         #position = ic.add_var(ic.eul_to_qua(POS_PLATES[plate]))
         print("Topic: " + clues[plate][0] + ", Clue: " + clues[plate][1])
-        position = ic.eul_to_qua(POS_PLATES[plate])
-        msg.data = position
+        #position = ic.eul_to_qua(POS_PLATES[plate])
+        msg.data = POS_PLATES[plate]
         rospy.sleep(0.05)
         ic.pos_pub.publish(msg)
         rospy.sleep(0.4)
