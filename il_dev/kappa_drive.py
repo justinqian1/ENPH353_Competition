@@ -5,6 +5,7 @@ import sys
 import numpy as np
 import os
 import random
+import tensorflow as tf
 from pynput import mouse
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
@@ -21,10 +22,12 @@ UI_PATH = os.path.join(SCRIPT_DIR, 'KappaDriver_app.ui')
 START_ROW = 24
 GUI_SCALE_FACT = 7
 LINEAR_X = 2.0
+KAPPA_MAX_INT = 100
 KAPPA_SLIDER_FACT = 0.015
 LIN_DIAL_FACT = 0.1
 RESPAWN_COORD = [-3.74, -2.31, 0.04, 0, 0, 0]
 OUTPUT_PATH = "/home/fizzer/il_train/labelled_data"
+MODEL_PATH = "/home/fizzer/il_train/hill_il_cnn_2.tflite"
         
 class KappaDrive(QtWidgets.QMainWindow):
     '''
@@ -32,6 +35,14 @@ class KappaDrive(QtWidgets.QMainWindow):
     @brief Class to send drive commands according to desired kappa (radius of curvature inverse) from GUI user input, and when desired to store command camera feed pairs as training data.
     '''
     def __init__(self):
+        # Load the TFLite model
+        self.interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+        self.interpreter.allocate_tensors()
+
+        # Get input/output indices
+        self.input_index = self.interpreter.get_input_details()[0]["index"]
+        self.output_index = self.interpreter.get_output_details()[0]["index"]
+
         self.max_lin_x = 3
         self.linear_x = 0
         self.kappa = 0.0
@@ -54,7 +65,7 @@ class KappaDrive(QtWidgets.QMainWindow):
         super(KappaDrive, self).__init__()
         loadUi(UI_PATH, self)
 
-        self.kappa_slider.setRange(-100, 100)
+        self.kappa_slider.setRange(-KAPPA_MAX_INT, KAPPA_MAX_INT)
         self.kappa_slider.sliderPressed.connect(self.driving)
         self.kappa_slider.sliderReleased.connect(self.stop)
         self.kappa_slider.valueChanged.connect(self.adjKappa)
@@ -102,16 +113,31 @@ class KappaDrive(QtWidgets.QMainWindow):
             self.drive_pub.publish(twist)
 
             # Adding to labelled collection.
-            prefix = self.label_prefix + "_"
-            if self.kappa > 0.0:
-                prefix += "1_"
-            else:
-                prefix += "0_"
-            kappa_str = f"{self.kappa:.3f}"
-            label = prefix + kappa_str
-            data_point = (label, self.image)
-            self.labelled_data += data_point
+            if self.recording:
+                prefix = self.label_prefix + "_"
+                kappa = self.kappa
+                if kappa >= 0.0:
+                    prefix += "1_"
+                else:
+                    prefix += "0_"
+                    kappa *= -1.0
+                kappa_str = f"{kappa:.3f}"
+                label = prefix + kappa_str
+                print(label)
+                data_point = (label, self.image)
+                self.labelled_data.append(data_point)
         else:
+            # Run the model (i.e., when the user isn't trying to drive, let the model drive:))
+            normalized = self.image.astype(np.float32) / 255.0
+            input_tensor = np.expand_dims(normalized, axis=(-1,0))
+            self.interpreter.set_tensor(self.input_index, input_tensor)
+            self.interpreter.invoke()
+            output = self.interpreter.get_tensor(self.output_index)
+            self.kappa = output[0] * (KAPPA_MAX_INT * KAPPA_SLIDER_FACT)
+            twist.linear.x = self.max_lin_x
+            twist.angular.z = -1.0 * self.kappa * twist.linear.x
+            print(twist.linear.x)
+            print(twist.angular.z)
             self.drive_pub.publish(twist)
 
     def time_update(self, msg):
@@ -144,6 +170,8 @@ class KappaDrive(QtWidgets.QMainWindow):
 
         for labelled in self.labelled_data:
             file_name = labelled[0] + ".png"
+            print(labelled[0])
+            print(labelled[1])
             full_path = os.path.join(OUTPUT_PATH, file_name)
             cv2.imwrite(full_path, labelled[1])
 
@@ -161,8 +189,14 @@ class KappaDrive(QtWidgets.QMainWindow):
             return
 
         self.image = self.image[START_ROW:, :]
-        pixmap = self.convert_cv_to_pixmap(self.image)
-        scaled_pixmap = pixmap.scaled(self.image.shape[1] * GUI_SCALE_FACT, self.image.shape[0] * GUI_SCALE_FACT, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        img_to_show = self.image.copy()
+        _, width = img_to_show.shape
+        kappa_prop = self.kappa / (KAPPA_MAX_INT * KAPPA_SLIDER_FACT)
+        cols_off_cent = int(kappa_prop * width / 2) - 1
+        img_to_show[:, (width // 2) + cols_off_cent] = 0
+
+        pixmap = self.convert_cv_to_pixmap(img_to_show)
+        scaled_pixmap = pixmap.scaled(img_to_show.shape[1] * GUI_SCALE_FACT, img_to_show.shape[0] * GUI_SCALE_FACT, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.display_live_image.setPixmap(scaled_pixmap)
 
     # Source: stackoverflow.com/questions/34232632/
