@@ -21,7 +21,7 @@ class LineDetector:
         self.image_sub = rospy.Subscriber(image_topic, Image, self.callback, queue_size=1)
         self.loc_sub = rospy.Subscriber('/B1/loc', String,self.state_callback,queue_size=1)
         self.bridge = CvBridge()
-        self.section='2'
+        self.section='1'
 
     def callback(self,data):
         try:
@@ -34,10 +34,14 @@ class LineDetector:
             msg.data = self.features_part1(cv_image)
         elif self.section=='2':
             msg.data = self.features_part2(cv_image)
+        elif self.section=='3':
+            msg.data = self.features_part3(cv_image)
+        elif self.section=='4':
+            msg.data = self.features_part4(cv_image)
         self.result_pub.publish(msg)
 
     def state_callback(self,data):
-        self.section=data
+        self.section=data.data
         print(f'Entering section {self.section}!')
     
     def features_part1(self,image):
@@ -100,36 +104,100 @@ class LineDetector:
         channel_b=image[:,:,0]
         channel_g=image[:,:,1]
         channel_r=image[:,:,2]
-        line_mask=(channel_b>130) & (channel_b<170) & (channel_g>175) & (channel_r < 203)
-        line_mask = line_mask.astype(np.uint8) * 255
-        blurred_line = cv2.GaussianBlur(line_mask, (17,17), 0)
-        _, blurred_line = cv2.threshold(blurred_line, 60, 255, cv2.THRESH_BINARY)
         kernel = np.ones((3,3), np.uint8)
-        blurred_line = cv2.morphologyEx(blurred_line, cv2.MORPH_OPEN, kernel)
-        line_mask=blurred_line>0  
-        line_mask[260:,:]=False      
 
-        features_mask=np.zeros(image.shape,dtype=np.uint8)
+        line_mask=(channel_b>130) & (channel_b<170) & (channel_g>175) & (channel_r < 212)
+        line_mask = line_mask.astype(np.uint8) * 255
+        blurred_line1 = cv2.GaussianBlur(line_mask, (19,19), 0)
+        _, blurred_line1 = cv2.threshold(blurred_line1, 50, 255, cv2.THRESH_BINARY)
+        blurred_line1 = cv2.morphologyEx(blurred_line1, cv2.MORPH_OPEN, kernel)
+        line_mask=blurred_line1>0  
+        line_mask[260:,:]=False  
         
+        features_mask=np.zeros(image.shape,dtype=np.uint8)
+
+        # water
+        water_mask= (channel_b>120) & (channel_b<200) & (channel_b+10>channel_g) & (channel_b+10>channel_r)
+        water_mask[:150,:]=False
+        features_mask[218:223,:,1]=200
+
+        # pink ln
+        pink_line_mask=(channel_r>180) & (channel_b>120) & (channel_g<130)
+
         # DRIVING BOX
-        features_mask[195:200,75:-75,2]=100 # main driving box (200:230, 80:-80)
-        features_mask[230:235,75:-75,2]=100 
-        features_mask[200:230,75:80,2]=100 
-        features_mask[200:230,-80:-75,2]=100 
+        features_mask[185:190,65:-65,2]=100 # main driving box (200:230, 80:-80)
+        features_mask[220:225,65:-65,2]=100 
+        features_mask[190:220,65:70,2]=100 
+        features_mask[190:220,-70:-65,2]=100 
         
         features_mask[line_mask]=255
+        features_mask[:,:,0][water_mask]=180
+        features_mask[:,:,0][pink_line_mask]=255
+        features_mask[:,:,2][pink_line_mask]=255
 
-        line_sz=np.sum(line_mask[200:230,80:-80])
+        line_sz=np.sum(line_mask[190:220,70:-70])
+        water_sz=np.sum(water_mask[:])
         line_left=np.where(line_mask[:,0])[0]
-        line_left_coord=line_left[2] if len(line_left)>=3 else -1 # use -3 to avoid outliers/noise
+        line_left_coord=line_left[0] if len(line_left)>=4 else -1 # require certain line height to reduce noise impact; use top instead of bottom of line for same reason
         line_right=np.where(line_mask[:,-1])[0]
-        line_right_coord=line_right[2] if len(line_right)>=3 else -1
+        line_right_coord=line_right[0] if len(line_right)>=4 else -1
+        line_left_amt=np.sum(line_mask[:,:10])
+        line_right_amt=np.sum(line_mask[:,-10:])
+        land_loc=np.where(~water_mask[220,:])[0]
+        land_left=land_loc[2] # avoid outliers
+        land_right=320-land_loc[-3] # dist from right edge
+        pink_ln_sz=np.sum(pink_line_mask[:])
+        pink_ln_row=np.any(pink_line_mask,axis=0)
+        pink_ln_idx=np.flatnonzero(pink_ln_row)
+        pink_ln_mid=(pink_ln_idx[-1]+pink_ln_idx[0])//2 if len(pink_ln_idx)>1 else -1
 
-        #cv2.imwrite('/tmp/frame.png',image)
+        #cv2.imwrite('/tmp/frame2.png',image)
         #cv2.imshow('camera feed', image)
         cv2.imshow('line',features_mask)
         cv2.waitKey(1)
-        return [line_sz,line_left_coord,line_right_coord]
+        return [line_sz,line_left_coord,line_right_coord,line_left_amt,line_right_amt,water_sz,land_left,land_right,pink_ln_sz,pink_ln_mid]
+    
+    def features_part3(self,image):
+        channel_b=image[:,:,0]
+        channel_g=image[:,:,1]
+        channel_r=image[:,:,2]
+        gs=cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        yoda=(gs>36) & (gs<52) & (channel_r>channel_b) & (channel_b>=channel_g) & (channel_b<channel_g+3)
+        car=(gs>35)&(gs<45)&(channel_r==channel_b)&(channel_r==channel_g)
+        pink_line_mask=(channel_r>250) & (channel_b>250) & (channel_g<10)
+
+        features_mask=np.zeros(image.shape,dtype=np.uint8)
+        features_mask[:,:,1][yoda]=255
+        features_mask[car]=60
+        features_mask[:,:,0][pink_line_mask]=255
+        features_mask[:,:,2][pink_line_mask]=255
+
+        yoda_sz=np.sum(yoda[:])
+        yoda_row=np.any(yoda,axis=0)
+        yoda_idx=np.flatnonzero(yoda_row)
+        yoda_mid=(yoda_idx[-3]+yoda_idx[2])//2 if len(yoda_idx)>5 else -1
+        car_sz=np.sum(car[:])
+        car_row=np.any(car,axis=0)
+        car_idx=np.flatnonzero(car_row)
+        car_mid=(car_idx[-3]+car_idx[2])//2 if len(car_idx)>5 else -1
+        pink_line_row=np.any(pink_line_mask,axis=0)
+        pink_line_idx=np.flatnonzero(pink_line_row)
+        pink_line_mid=(pink_line_idx[-3]+pink_line_idx[2])//2 if len(pink_line_idx)>5 else -1
+
+        #cv2.imwrite('/tmp/frame.png',image)
+        cv2.imshow('camera feed', image)
+        cv2.imshow('features',features_mask)
+        cv2.waitKey(1)
+        return [yoda_sz,yoda_mid,car_sz,car_mid,pink_line_mid]
+    
+    def features_part4(self,image):
+        channel_b=image[:,:,0]
+        channel_g=image[:,:,1]
+        channel_r=image[:,:,2]
+        cv2.imshow('camera feed', image)
+        cv2.waitKey(1)
+        return [1]
 
 def main():
     rospy.init_node('line_detector', anonymous=True)
