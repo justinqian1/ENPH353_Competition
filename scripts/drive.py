@@ -35,7 +35,7 @@ SPEED_FWD=[1.8,1.8,2.0]
 SPEED_TURN=[5.0,4.0,5.0]
 SPEED_XWALK_LOCK=7.0
 SPEED_FWD_LEFT_LOCK=4.0
-SPEED_ALIGN=[0.6,1.5,3.5] # 3 align speeds for convenience
+SPEED_ALIGN=[0.4,1.2,4.0] # 3 align speeds for convenience
 
 S1_LINE_FWD_BOX_TH=5 # num px in driving box
 S1_LINE_EDGE_TOL=30 # diff bw lineL and lineR to go back to moving fwd
@@ -81,8 +81,8 @@ CAR_END_TURN_TH=25 # same for car
 PAST_YODA_YODA_TH=200 # num yoda px to say we're at the car
 PAST_YODA_CAR_TH=200 # num car px to say we're at the car
 CAR_TH=5000 # num car px to say we're at the pink ln
-PINK_LN_ALIGN_SPEED_TH=100 # threshold at which we slow align speed
-S3_PINK_LN_TH=155 # dist from pink ln to median to say we're aligned
+PINK_LN_ALIGN_SPEED_TH=120 # threshold at which we slow align speed
+S3_PINK_LN_TH=157 # dist from pink ln to median to say we're aligned
 
 
 class Driver:
