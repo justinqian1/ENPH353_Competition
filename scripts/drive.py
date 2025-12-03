@@ -454,7 +454,7 @@ class Driver:
             msg = Float32MultiArray()
             msg.data=[-4.3,-2.3,0.1,0,0,0]
             self.spawn_pub.publish(msg)
-            rospy.signal_shutdown("Received shutdown message")
+            #rospy.signal_shutdown("Received shutdown message")
 
 def main():
     rospy.init_node('driver')
