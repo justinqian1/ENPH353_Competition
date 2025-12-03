@@ -24,6 +24,7 @@ class States(Enum):
     STOP_END=auto()
 
 start_timer = String('team,pass,0,whatever')
+stop_timer = String('team,pass,-1,whatever')
 
 IMG_MID=160
 S1_DATA_LEN=10 # arr of length 10 for sec 1
@@ -104,13 +105,18 @@ class Driver:
         self.aligning_tunnel=False
 
         self.timer = rospy.Timer(rospy.Duration(0.05), self.drive)
+        self.stop_timer = rospy.Timer(rospy.Duration(90.0), self.stop_timer_callback, oneshot=True)
 
         self.time_pub.publish(start_timer)
-        #self.start_time = rospy.Time.now()
-        #self.duration = rospy.Duration(120.0) # drive for 10 s
 
     def callback(self, msg):
         self.latest_data=msg.data
+    
+    def stop_timer_callback(self, event):
+        self.drive_pub.publish(Twist())    
+        self.time_pub.publish(stop_timer)  
+        rospy.loginfo("Time limit reached. Stopping driver.")
+        rospy.signal_shutdown("Timed shutdown")
     
     def drive(self,event):
         data=self.latest_data
@@ -126,16 +132,7 @@ class Driver:
             self.driving_section4(data)
         else:
             print(f"WARNING: Section: {self.section} but data length: {len(data)}")
-
-        '''
-        elapsed = rospy.Time.now() - self.start_time
-        if elapsed > self.duration:
-            self.state=States.STOP_MAXTIME
-            self.drive_pub.publish(Twist())
-            self.time_pub.publish(stop_timer)
-            return
-        '''
-
+        
     def driving_section1(self,data):
         line_fwd,line_L,line_M,line_R,red_ln,pink_ln,ped,truck,road_sz,road_L=data
         now=rospy.Time.now()
