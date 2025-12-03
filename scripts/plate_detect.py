@@ -19,8 +19,8 @@ GRAY_MASK = [10, -10, 10, -10, 10, -10]
 TEXT_MASK = [256, 50, 256, 50, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
-MIN_BLUE_COUNT = 8000
-MIN_PLATE_AREA = 16000
+MIN_BLUE_COUNT = 14000
+MIN_PLATE_AREA = 24000
 MIN_SIGN_COUNT = 100
 MIN_SIGN_AREA = 100
 MIN_CNT_SIZE = 50
@@ -40,7 +40,7 @@ PASSWORD = "password"
 
 CLUE_TOPICS = {'SIZE': 1, 'VICTIM': 2, 'CRIME': 3, 'TIME': 4, 'PLACE': 5, 'MOTIVE': 6, 'WEAPON': 7, 'BANDIT': 8}
 CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
-OUTPUT_PATH = '/home/fizzer/cnn_train/test_chars'
+OUTPUT_PATH = '/home/fizzer/cnn_train/mdl_chars'
 MODEL_PATH = '/home/fizzer/cnn_train/char_reader_cnn.tflite'
 POSS_CHARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 
               'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 
@@ -85,7 +85,7 @@ class PlateDetector:
         self.right_image_sub = rospy.Subscriber(
             right_image_topic, Image, self.right_callback, queue_size=1
         )
-        self.timer = rospy.Timer(rospy.Duration(0.2), self.callback)
+        self.timer = rospy.Timer(rospy.Duration(0.1), self.callback)
         self.left_image = None
         self.right_image = None
         self.bridge = CvBridge()
@@ -152,9 +152,21 @@ class PlateDetector:
         @param mask the mask to apply to find prospective figures
         @param min_count the minimal pixel count required
         """
-        if self.curr_plate == 1 or self.curr_plate == 2:
+        if self.curr_plate == 1:
+            min_count -= 6000
+            min_area -= 6000
+            #min_count -= 8000
+            #min_area -= 10000
+        elif self.curr_plate == 2:
+            min_count -= 5000
+            min_area -= 6000
+        elif self.curr_plate == 5:
             min_count -= 4000
-            min_area -= 2000
+            min_area -= 6000
+        elif self.curr_plate == 6:
+            min_count -= 10000
+            min_area -= 120000
+
 
         analysis_mask = self.apply_mask(frame, mask)
 
@@ -224,6 +236,9 @@ class PlateDetector:
         M = cv2.getPerspectiveTransform(corners_ordered, dest)
         plate_rectified = cv2.warpPerspective(frame, M, (W, H))
 
+        print("Pixel count: " + str(pixel_count))
+        print("Area: " + str(area))
+
         return plate_rectified
 
     def scan_sign(self, mask, min_count, min_area):
@@ -266,7 +281,7 @@ class PlateDetector:
 
         w = int(img_width * CHAR_WIDTH_PROP)
         h = int(img_height * CHAR_HEIGHT_PROP)
-        lastCharX = 0
+        #lastCharX = 0
 
         for cnt in contours:
             if cv2.contourArea(cnt) < MIN_CNT_SIZE:
