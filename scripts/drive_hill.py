@@ -67,6 +67,7 @@ class DataCollector:
         self.image_sub = rospy.Subscriber('/B1/rrbot/camera1/image_raw', Image, self.callback, queue_size=1)
         self.loc_sub = rospy.Subscriber('/B1/loc', String,self.loc_callback,queue_size=1)
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
+        self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
         self.stop_timer = rospy.Timer(rospy.Duration(30.0), self.stop_timer_callback, oneshot=True)
 
 
