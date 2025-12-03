@@ -426,23 +426,7 @@ class Driver:
         self.drive_pub.publish(twist)
 
     def driving_section4(self,data):
-        self.state=States.FWD
-
-        twist = Twist()
-        if self.state == States.FWD:
-            twist.linear.x = SPEED_FWD[2]
-            twist.angular.z = 0
-        elif self.state == States.LEFT:
-            twist.linear.x = 0
-            twist.angular.z = SPEED_TURN[2]
-        elif self.state == States.RIGHT:
-            twist.linear.x = 0
-            twist.angular.z = -SPEED_TURN[2]
-        else: # stopped
-            twist.linear.x = 0
-            twist.angular.z = 0
-        print(f"{self.state} | Data: {data}")
-        self.drive_pub.publish(twist)
+        self.drive_pub.publish(Twist())
         
     def switch_section(self,new_section):
         self.state=States.STOP_TEMP
