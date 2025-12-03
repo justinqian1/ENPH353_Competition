@@ -37,7 +37,8 @@ class LineDetector:
         elif self.section=='3':
             msg.data = self.features_part3(cv_image)
         elif self.section=='4':
-            msg.data = self.features_part4(cv_image)
+            print("Section 4 reached. Shutting down artisinal algorithm")
+            rospy.signal_shutdown("Received shutdown message")
         self.result_pub.publish(msg)
 
     def state_callback(self,data):
@@ -63,6 +64,7 @@ class LineDetector:
         ped_mask[:,-50:]=False
         truck_mask=(channel_b>110) & (channel_b<195) & (b_minus_g==0) & (b_minus_r==0) & (g_minus_r==0)
 
+        '''
         features_mask=np.zeros(image.shape,dtype=np.uint8)
         features_mask[210:,140:145,2]=80 # driving box 1
         features_mask[210:,175:180,2]=80
@@ -81,6 +83,7 @@ class LineDetector:
         cv2.imshow('camera feed', image)
         cv2.imshow('line',features_mask)
         cv2.waitKey(1)
+        '''
 
         # decide if line is directly in front of robot (need to turn)
         line_in_front=np.sum(line_mask[210:240,140:180])+np.sum(line_mask[240:,70:250]) 
@@ -114,17 +117,17 @@ class LineDetector:
         line_mask=blurred_line1>0  
         line_mask[260:,:]=False  
         
-        features_mask=np.zeros(image.shape,dtype=np.uint8)
-
         # water
         water_mask= (channel_b>120) & (channel_b<200) & (channel_b+10>channel_g) & (channel_b+10>channel_r)
         water_mask[:150,:]=False
-        features_mask[218:223,:,1]=200
 
         # pink ln
         pink_line_mask=(channel_r>180) & (channel_b>120) & (channel_g<130)
 
-        # DRIVING BOX
+        '''
+        features_mask=np.zeros(image.shape,dtype=np.uint8)
+        features_mask[218:223,:,1]=200 # line for water detection
+
         features_mask[185:190,65:-65,2]=100 # main driving box (200:230, 80:-80)
         features_mask[220:225,65:-65,2]=100 
         features_mask[190:220,65:70,2]=100 
@@ -134,6 +137,7 @@ class LineDetector:
         features_mask[:,:,0][water_mask]=180
         features_mask[:,:,0][pink_line_mask]=255
         features_mask[:,:,2][pink_line_mask]=255
+        '''
 
         line_sz=np.sum(line_mask[190:220,70:-70])
         water_sz=np.sum(water_mask[:])
@@ -153,8 +157,8 @@ class LineDetector:
 
         #cv2.imwrite('/tmp/frame2.png',image)
         #cv2.imshow('camera feed', image)
-        cv2.imshow('line',features_mask)
-        cv2.waitKey(1)
+        #cv2.imshow('line',features_mask)
+        #cv2.waitKey(1)
         return [line_sz,line_left_coord,line_right_coord,line_left_amt,line_right_amt,water_sz,land_left,land_right,pink_ln_sz,pink_ln_mid]
     
     def features_part3(self,image):
@@ -167,11 +171,13 @@ class LineDetector:
         car=(gs>35)&(gs<45)&(channel_r==channel_b)&(channel_r==channel_g)
         pink_line_mask=(channel_r>250) & (channel_b>250) & (channel_g<10)
 
+        '''
         features_mask=np.zeros(image.shape,dtype=np.uint8)
         features_mask[:,:,1][yoda]=255
         features_mask[car]=60
         features_mask[:,:,0][pink_line_mask]=255
         features_mask[:,:,2][pink_line_mask]=255
+        '''
 
         yoda_sz=np.sum(yoda[:])
         yoda_row=np.any(yoda,axis=0)
@@ -186,18 +192,11 @@ class LineDetector:
         pink_line_mid=(pink_line_idx[-3]+pink_line_idx[2])//2 if len(pink_line_idx)>5 else -1
 
         #cv2.imwrite('/tmp/frame.png',image)
-        cv2.imshow('camera feed', image)
-        cv2.imshow('features',features_mask)
-        cv2.waitKey(1)
+        #cv2.imshow('camera feed', image)
+        #cv2.imshow('features',features_mask)
+        #cv2.waitKey(1)
         return [yoda_sz,yoda_mid,car_sz,car_mid,pink_line_mid]
-    
-    def features_part4(self,image):
-        channel_b=image[:,:,0]
-        channel_g=image[:,:,1]
-        channel_r=image[:,:,2]
-        cv2.imshow('camera feed', image)
-        cv2.waitKey(1)
-        return [1]
+
 
 def main():
     rospy.init_node('line_detector', anonymous=True)

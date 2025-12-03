@@ -50,7 +50,7 @@ TRUCK_STOP_TH=1100 # num px in truck to stop for it
 TRUCK_RESUME_TH=600 # num px in truck to resume; diff to avoid stop/restart loop
 ROAD_L_TH=185 # road y coord to exit line
 XWALK_LOCK_TIME=0.3 # time to lock fwd state in crosswalk
-ENTER_LOOP_LOCK_TIME=0.3 # lock left turn at start of loop
+ENTER_LOOP_LOCK_TIME=0.25 # lock left turn at start of loop
 EXIT_LOOP_LOCK_TIME=0.6 # lock time for fwd left while exiting
 EXIT_LOOP_WAIT_TIME=4.0 # wait time before logic to exit loop hits
 
@@ -59,7 +59,8 @@ S2_LINE_FWD_FWD_TH=500 # num px in driving box to go temp stop -> fwd
 S2_LINE_EDGE_TOL=18 # diff bw lineL and lineR to go back to moving fwd 
 S2_LINE_LR_DIFF_TH=30 # diff bw left and right lines to trigger pid driving
 ENTER_BRIDGE_TH=4000 # num water px to enter bridge section
-EXIT_BRIDGE_TH=100 # num water px to leave bridge section
+EXIT_BRIDGE_TH=200 # num water px to leave bridge section
+PAST_BRIDGE_LOCK_TIME=0.25 # time to lock fwd after passing bridge
 WATER_TURN_TH=75 # num pix on either side to start turning
 WATER_STOP_TURN_TH=30 # num px to stop turning
 S2_PINK_LN_TH1=50 # threshold to just drive twd pink line
@@ -77,7 +78,7 @@ CAR_END_TURN_TH=25 # same for car
 PAST_YODA_YODA_TH=200 # num yoda px to say we're at the car
 PAST_YODA_CAR_TH=200 # num car px to say we're at the car
 CAR_TH=5000 # num car px to say we're at the pink ln
-S3_PINK_LN_TOL=5 # dist from pink ln to median to say we're aligned
+S3_PINK_LN_TH=157 # dist from pink ln to median to say we're aligned
 
 
 class Driver:
@@ -150,7 +151,7 @@ class Driver:
                 self.state=States.STOP_TEMP
             elif truck>TRUCK_STOP_TH and self.past_ped and not self.past_loop: # STOP FOR TRUCK
                 self.state=States.STOP_TRUCK
-            elif self.past_ped and not self.past_loop and line_L==-1 and line_R==-1 and road_sz>ROAD_SZ_TH: # ENTERING LOOP; consider line_M==-1
+            elif self.past_ped and not self.past_loop and line_L==-1 and line_R==-1 and (line_M==-1 or line_M>LINE_M_TH) and road_sz>ROAD_SZ_TH: # ENTERING LOOP; consider line_M==-1
                 self.state=States.FWD_LEFT_LOCK1
                 self.locked_until = now + rospy.Duration(ENTER_LOOP_LOCK_TIME)
                 self.exit_loop_time = now+rospy.Duration(EXIT_LOOP_WAIT_TIME)
@@ -228,7 +229,7 @@ class Driver:
             twist.angular.z = ang_speed
         elif self.state==States.FWD_LEFT_LOCK1: # entering loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
-            twist.angular.z = SPEED_TURN[0]*1.2
+            twist.angular.z = SPEED_TURN[0]*1.1
         elif self.state==States.FWD_LEFT_LOCK2: # exiting loop
             twist.linear.x = SPEED_FWD_LEFT_LOCK
             twist.angular.z = SPEED_TURN[0]*0.9
@@ -271,6 +272,7 @@ class Driver:
             return
         
         # main driving loop
+        now=rospy.Time.now()
         if self.state in [States.FWD,States.FWD_LEFT,States.FWD_RIGHT]:
             if line_fwd>S2_LINE_FWD_TURN_TH:
                 self.state=States.STOP_TEMP
@@ -286,6 +288,8 @@ class Driver:
         elif (self.state == States.LEFT and line_L > line_R-S2_LINE_EDGE_TOL and line_L > -1) or \
             (self.state == States.RIGHT and line_R > line_L-S2_LINE_EDGE_TOL and line_R > -1):
             self.state = States.STOP_TEMP
+        elif self.state == States.FWD_LOCK and now > self.locked_until: # done locking
+            self.state=States.STOP_TEMP
         elif self.state==States.STOP_TEMP:
             if line_fwd>S2_LINE_FWD_FWD_TH:
                 self.state=States.RIGHT if amt_L > amt_R else States.LEFT
@@ -302,7 +306,7 @@ class Driver:
                 self.state=States.FWD_LEFT if pink_ln_mid<IMG_MID else States.FWD_RIGHT
 
         twist = Twist()
-        if self.state == States.FWD:
+        if self.state in [States.FWD,States.FWD_LOCK]:
             twist.linear.x = SPEED_FWD[1]
             twist.angular.z = 0
         elif self.state == States.LEFT:
@@ -329,6 +333,8 @@ class Driver:
             if amt_water<EXIT_BRIDGE_TH:
                 self.on_bridge=False
                 self.past_bridge=True
+                self.state=States.FWD_LOCK
+                self.locked_until = rospy.Time.now() + rospy.Duration(PAST_BRIDGE_LOCK_TIME)
                 return
             if self.state == States.FWD:
                 if land_L > WATER_TURN_TH:
@@ -378,7 +384,7 @@ class Driver:
                  (self.state == States.RIGHT and yoda_mid-IMG_MID<YODA_END_TURN_TH):
                 self.state=States.FWD if yoda_sz<YODA_STOP_TH else States.STOP_YODA
         elif self.aligning_tunnel:
-            if self.state == States.ALIGN_LEFT and abs(IMG_MID-pink_ln_mid)<S3_PINK_LN_TOL:
+            if self.state == States.ALIGN_LEFT and pink_ln_mid>S3_PINK_LN_TH:
                 self.switch_section('4')
             elif car_sz>CAR_TH:
                 self.state=States.ALIGN_LEFT
@@ -436,11 +442,9 @@ class Driver:
         self.drive_pub.publish(Twist())
         self.section=new_section
         self.loc_pub.publish(new_section)
-        '''
-        if new_section=='3':
-            self.state=States.STOP_END
-            self.time_pub.publish(stop_timer)
-        '''
+        if new_section=='4':
+            print("Section 4 reached. Shutting down driver")
+            rospy.signal_shutdown("Received shutdown message")
 
 def main():
     rospy.init_node('driver')

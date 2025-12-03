@@ -9,4 +9,14 @@
         name="driver" 
         output="screen">
    </node>
+   <node pkg="team5_code" 
+		type="drive_hill.py" 
+		name="drive_hill" 
+		output="screen">
+  	</node>
+	<node pkg="team5_code"
+		type="plate_detect.py"
+		name="plate_detector"
+		output="screen">
+    </node>
 </launch>
