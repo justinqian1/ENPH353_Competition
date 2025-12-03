@@ -32,6 +32,7 @@ ID2STATE = {
 }
 MODEL_PATH="/home/fizzer/ros_ws/src/team5_code/models/hill_cnn_jq_v10.tflite"
 BASE_SPEED=2.0
+stop_timer = String('team,pass,-1,whatever')
 
 class DataCollector:
     def __init__(self):
@@ -66,8 +67,16 @@ class DataCollector:
         self.image_sub = rospy.Subscriber('/B1/rrbot/camera1/image_raw', Image, self.callback, queue_size=1)
         self.loc_sub = rospy.Subscriber('/B1/loc', String,self.loc_callback,queue_size=1)
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
+        self.stop_timer = rospy.Timer(rospy.Duration(30.0), self.stop_timer_callback, oneshot=True)
+
 
         rospy.loginfo("Data collector started.")
+
+    def stop_timer_callback(self, event):
+        self.drive_pub.publish(Twist())    
+        self.time_pub.publish(stop_timer)  
+        rospy.loginfo("Time limit reached. Stopping driver.")
+        rospy.signal_shutdown("Timed shutdown")
 
     def keyboard_listener(self):
         old_settings = termios.tcgetattr(sys.stdin)
