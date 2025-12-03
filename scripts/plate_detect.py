@@ -19,8 +19,8 @@ GRAY_MASK = [10, -10, 10, -10, 10, -10]
 TEXT_MASK = [256, 50, 256, 50, 256, -256]
 MASK_DICT = {"b_g_upper":0, "b_g_lower":1, "b_r_upper":2,
              "b_r_lower":3, "g_r_upper":4, "g_r_lower":5}
-MIN_BLUE_COUNT = 10000
-MIN_PLATE_AREA = 24000
+MIN_BLUE_COUNT = 8000
+MIN_PLATE_AREA = 16000
 MIN_SIGN_COUNT = 100
 MIN_SIGN_AREA = 100
 MIN_CNT_SIZE = 50
@@ -97,6 +97,7 @@ class PlateDetector:
             return
         poss_plate=self.scan_sign(SIGN_MASK, MIN_BLUE_COUNT, MIN_PLATE_AREA)
         if poss_plate is not None:
+            # cv2.imshow("Possible plate " + str(self.curr_plate), poss_plate)
             poss_sign=self.extract_process_plate(poss_plate, GRAY_MASK, MIN_SIGN_COUNT, MIN_SIGN_AREA)
             if poss_sign is not None:                
                 # extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
@@ -151,29 +152,49 @@ class PlateDetector:
         @param mask the mask to apply to find prospective figures
         @param min_count the minimal pixel count required
         """
+        if self.curr_plate == 1 or self.curr_plate == 2:
+            min_count -= 4000
+            min_area -= 2000
+
         analysis_mask = self.apply_mask(frame, mask)
 
         pixel_count = np.count_nonzero(analysis_mask)
-        self.pixel_pub.publish(pixel_count)
+        if mask == SIGN_MASK:
+            self.pixel_pub.publish(pixel_count)
 
         if pixel_count < min_count:
+            if min_count == MIN_SIGN_COUNT and mask == SIGN_MASK:
+                print("Only " + str(pixel_count))
+                # cv2.imshow(str(pixel_count) + " gray pixels, too little?", analysis_mask)
+                cv2.waitKey(3)
             return None
 
         contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
+            print("Landed here somehow?")
             return None
 
         sign_cnt = max(contours, key=cv2.contourArea)
 
-        req_acc = 0.02 * cv2.arcLength(sign_cnt, True) # tells approxPolyDP maximal distance allowed between contour and simplified polygon.
+        req_acc = 0.05 * cv2.arcLength(sign_cnt, True) # tells approxPolyDP maximal distance allowed between contour and simplified polygon.
         approx = cv2.approxPolyDP(sign_cnt, req_acc, True)
         area = cv2.contourArea(approx)
         
-        self.area_pub.publish(int(area))
+        if mask == SIGN_MASK:            
+            self.area_pub.publish(int(area))
 
         # If the shape of the largest contour isn't a rectangle, it's likely some of the border is off the screen, so we shouldn't trust that the text will be fully included.
         if len(approx) != 4  or area < min_area:
+            if area < min_area:
+                print(str(area) + " is the area seen.")
+                # cv2.imshow(str(area) + " culprit area!", analysis_mask)
+                cv2.waitKey(3)
+            else:
+                print(len(approx))
+                print("Doesn't see it as a rectangle, I suppose!")
+                # cv2.imshow("Not a rectangle", frame)
+                cv2.waitKey(3)
             return None
 
         corners = approx.reshape(4, 2).astype(np.float32)
@@ -221,7 +242,7 @@ class PlateDetector:
                 return poss_plate
         return None
 
-    def find_word(self, sign_img, text_mask):
+    def find_word(self, sign_img, text_mask, sw_mask_called=0):
         """
         @brief Extracts and sorts letters contained in images.
         @param text_img the binary image to pull letters from.
@@ -253,23 +274,23 @@ class PlateDetector:
 
             x, y, _w, _h = cv2.boundingRect(cnt)
             if _w > int(1.5 * w):
-                text_mask[1] += 5
-                text_mask[3] += 5
-                print("Recursively calling with a stronger mask to prevent jumbling")
-                return self.find_word(sign_img, text_mask)
-                '''
+                if sw_mask_called != 2:
+                    text_mask[1] += 5
+                    text_mask[3] += 5
+                    print("Recursively calling with a stronger mask to prevent jumbling")
+                    return self.find_word(sign_img, text_mask, sw_mask_called=1)
+                
                 chars_jumb = math.ceil(_w / w)
                 avg_width = int(_w / chars_jumb)
 
                 for char_to_parse in range(chars_jumb):
                     cv2.rectangle(img_to_show, (x + char_to_parse * avg_width, y), (x + (char_to_parse + 1) * avg_width, y + _h), (255, 255, 0), 1)
-                    store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h)
-                '''
+                    store_in_right_row(x + char_to_parse * avg_width, y, avg_width, _h) 
             elif _w < int(0.4 * w) or _h < int(0.6 * h):
                 text_mask[1] -= 5
                 text_mask[3] -= 5
                 print("Recursively calling with a weaker mask to prevent fraying!")
-                return self.find_word(sign_img, text_mask)
+                return self.find_word(sign_img, text_mask, sw_mask_called=2)
             else:
                 cv2.rectangle(img_to_show, (x, y), (x + _w, y + _h), (255, 255, 0), 1)
                 store_in_right_row(x, y, _w, _h)
@@ -277,6 +298,9 @@ class PlateDetector:
         upper_char_rects.sort(key=lambda r: r[0])
         lower_char_rects.sort(key=lambda r: r[0])
 
+        if len(upper_char_rects) == 0 or len(lower_char_rects) == 0:
+            cv2.imshow("Too jumbled?", img_to_show)
+            cv2.waitKey(3)
         clue_pred = self.cnn_proc(text_img, upper_char_rects, w, "")
 
         if clue_pred in CLUE_TOPICS.keys():
