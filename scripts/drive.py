@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 import rospy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Int32MultiArray, String
+from std_msgs.msg import Int32MultiArray, Float32MultiArray,String
 from enum import Enum, auto
 
 class States(Enum):
@@ -92,6 +92,7 @@ class Driver:
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
         self.loc_pub = rospy.Publisher('/B1/loc', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
+        self.spawn_pub = rospy.Publisher('/spawn_position', Float32MultiArray, queue_size=10)
         self.section='1' # sections 1,2,3,4
         self.latest_data=None
         self.state = States.FWD 
@@ -450,6 +451,9 @@ class Driver:
         self.loc_pub.publish(new_section)
         if new_section=='4':
             print("Section 4 reached. Shutting down driver")
+            msg = Float32MultiArray()
+            msg.data=[-4.3,-2.3,0.1,0,0,0]
+            self.spawn_pub.publish(msg)
             rospy.signal_shutdown("Received shutdown message")
 
 def main():
