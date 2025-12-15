@@ -30,7 +30,7 @@ ID2STATE = {
     3: "RIGHT",
     4: "STOP"
 }
-MODEL_PATH="/home/fizzer/ros_ws/src/team5_code/models/hill_cnn_jq_v10.tflite"
+MODEL_PATH="/home/fizzer/ros_ws/src/ENPH353_Competition/ENPH353_Competition/models/hill_cnn_jq_v10.tflite"
 BASE_SPEED=2.0
 stop_timer = String('team,pass,-1,whatever')
 
@@ -68,7 +68,7 @@ class DataCollector:
         self.loc_sub = rospy.Subscriber('/B1/loc', String,self.loc_callback,queue_size=1)
         self.drive_pub = rospy.Publisher('/B1/cmd_vel', Twist, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
-        self.stop_timer = rospy.Timer(rospy.Duration(30.0), self.stop_timer_callback, oneshot=True)
+        self.stop_timer = rospy.Timer(rospy.Duration(120.0), self.stop_timer_callback, oneshot=True)
 
 
         rospy.loginfo("Data collector started.")
@@ -149,8 +149,8 @@ class DataCollector:
             twist.linear.x = 0
             twist.angular.z = -BASE_SPEED*2
         else: # stopped
-            twist.linear.x = 0
-            twist.angular.z = 0
+            twist.linear.x = 0.05
+            twist.angular.z = 1.0
         self.drive_pub.publish(twist)
     
     def loc_callback(self,msg):

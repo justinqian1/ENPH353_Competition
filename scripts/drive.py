@@ -50,7 +50,7 @@ PED_TH=20 # num px of ped to count as seen
 ROAD_SZ_TH=42_000 # num px of road to start seq to enter loop
 TRUCK_STOP_TH=1100 # num px in truck to stop for it
 BLOCK_ENTER_LOOP_TRUCK_TH=700 # num px truck that entering loop is paused
-RESUME_ENTER_LOOP_TRUCK_TH=500 # num px truck to enter loop
+RESUME_ENTER_LOOP_TRUCK_TH=400 # num px truck to enter loop
 TRUCK_RESUME_TH=600 # num px in truck to resume; diff to avoid stop/restart loop
 ROAD_L_TH=185 # road y coord to exit line
 XWALK_LOCK_TIME=0.3 # time to lock fwd state in crosswalk
@@ -153,7 +153,7 @@ class Driver:
                 self.state=States.STOP_TEMP
             elif truck>TRUCK_STOP_TH and self.past_ped and not self.past_loop: # STOP FOR TRUCK
                 self.state=States.STOP_TRUCK
-            elif self.past_ped and not self.past_loop and line_L==-1 and line_R==-1 and (line_M==-1 or line_M>LINE_M_TH) and road_sz>ROAD_SZ_TH: # ENTERING LOOP; consider line_M==-1
+            elif self.past_ped and not self.past_loop and line_L==-1 and line_R==-1 and road_sz>ROAD_SZ_TH: # ENTERING LOOP; consider line_M==-1
                 self.state=States.FWD_LOCK_ENTER_LOOP if truck<BLOCK_ENTER_LOOP_TRUCK_TH else States.STOP_TRUCK_ENTER_LOOP
                 self.exit_loop_time = now+rospy.Duration(EXIT_LOOP_WAIT_TIME)
             elif road_L< ROAD_L_TH and now > self.exit_loop_time and not self.past_loop: # EXITING LOOP
@@ -438,7 +438,7 @@ class Driver:
             msg = Float32MultiArray()
             msg.data=[-4.3,-2.3,0.1,0,0,0]
             self.spawn_pub.publish(msg)
-            #rospy.signal_shutdown("Received shutdown message")
+            rospy.signal_shutdown("Received shutdown message")
 
 def main():
     rospy.init_node('driver')

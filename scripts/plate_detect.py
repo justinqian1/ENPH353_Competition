@@ -37,6 +37,7 @@ CHARS_BOT_ROW = 12
 
 TEAMID = "team5"
 PASSWORD = "password"
+STOP_MSG = String('team5,pass,-1,whatever')
 
 CLUE_TOPICS = {'SIZE': 1, 'VICTIM': 2, 'CRIME': 3, 'TIME': 4, 'PLACE': 5, 'MOTIVE': 6, 'WEAPON': 7, 'BANDIT': 8}
 CSV_PATH = '/home/fizzer/ros_ws/src/2025_competition/enph353/enph353_gazebo/scripts/plates.csv'
@@ -70,7 +71,7 @@ class PlateDetector:
         self.last_scan_time = time()
 
         #For CNN training!
-        self.clues = self.get_clues()
+        # self.clues = self.get_clues()
 
         self.location_pub = rospy.Publisher('/location', String, queue_size=1)
         self.time_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
@@ -85,7 +86,7 @@ class PlateDetector:
         self.right_image_sub = rospy.Subscriber(
             right_image_topic, Image, self.right_callback, queue_size=1
         )
-        self.timer = rospy.Timer(rospy.Duration(0.1), self.callback)
+        self.timer = rospy.Timer(rospy.Duration(0.2), self.callback)
         self.left_image = None
         self.right_image = None
         self.bridge = CvBridge()
@@ -103,8 +104,8 @@ class PlateDetector:
                 # extracted_text = self.apply_mask(poss_sign, TEXT_MASK)
                 # isolated_contours = self.find_word(extracted_text)
                 isolated_contours = self.find_word(poss_sign, TEXT_MASK)
-                cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
-                cv2.waitKey(3)
+                # cv2.imshow("Plate " + str(self.curr_plate), isolated_contours)
+                # cv2.waitKey(3)
                 self.curr_plate += 1
                 self.last_scan_time = time()
 
@@ -166,6 +167,9 @@ class PlateDetector:
         elif self.curr_plate == 6:
             min_count -= 10000
             min_area -= 120000
+        elif self.curr_plate == 7:
+            min_count -= 5000
+            min_area -= 5000
 
 
         analysis_mask = self.apply_mask(frame, mask)
@@ -178,7 +182,7 @@ class PlateDetector:
             if min_count == MIN_SIGN_COUNT and mask == SIGN_MASK:
                 print("Only " + str(pixel_count))
                 # cv2.imshow(str(pixel_count) + " gray pixels, too little?", analysis_mask)
-                cv2.waitKey(3)
+                # cv2.waitKey(3)
             return None
 
         contours, _ = cv2.findContours(analysis_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -201,7 +205,7 @@ class PlateDetector:
             if area < min_area:
                 print(str(area) + " is the area seen.")
                 # cv2.imshow(str(area) + " culprit area!", analysis_mask)
-                cv2.waitKey(3)
+                # cv2.waitKey(3)
             else:
                 print(len(approx))
                 print("Doesn't see it as a rectangle, I suppose!")
@@ -314,8 +318,9 @@ class PlateDetector:
         lower_char_rects.sort(key=lambda r: r[0])
 
         if len(upper_char_rects) == 0 or len(lower_char_rects) == 0:
-            cv2.imshow("Too jumbled?", img_to_show)
-            cv2.waitKey(3)
+            # cv2.imshow("Too jumbled?", img_to_show)
+            # cv2.waitKey(3)
+            pass
         clue_pred = self.cnn_proc(text_img, upper_char_rects, w, "")
 
         if clue_pred in CLUE_TOPICS.keys():
@@ -323,12 +328,14 @@ class PlateDetector:
         else:
             self.curr_plate = CLUE_TOPICS[self.closest_clue(clue_pred)]
 
-        value_pred = self.cnn_proc(text_img, lower_char_rects, w, self.clues[self.curr_plate-1][1], True)
+        value_pred = self.cnn_proc(text_img, lower_char_rects, w, "")
 
         rlmsg = TEAMID + ',' + PASSWORD + ',' + str(self.curr_plate) + ',' + value_pred
         message = clue_pred + ', ' + value_pred
         self.time_pub.publish(rlmsg)
-        print(message)
+        rospy.sleep(0.01)
+        if self.curr_plate == 8:
+            self.time_pub.publish(STOP_MSG)
 
         return img_to_show 
     
@@ -382,16 +389,6 @@ class PlateDetector:
         pred_string = ''.join(chars)
 
         return pred_string
-
-    def get_clues(self):
-        clues = []
-
-        with open(CSV_PATH, 'r', newline='', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            for row in reader:
-                if row:
-                    clues.append(tuple(row))
-        return clues
 
     def closest_clue(self, read_clue):
         def hamming_dist(s1, s2):
